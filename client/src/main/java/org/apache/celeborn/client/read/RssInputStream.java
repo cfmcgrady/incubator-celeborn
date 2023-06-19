@@ -503,7 +503,7 @@ public abstract class RssInputStream extends InputStream {
         return false;
       }
 
-      long startTime = System.currentTimeMillis();
+      long startTime = System.nanoTime();
 
       boolean hasData = false;
       while (currentChunk.isReadable() || moveToNextChunk()) {
@@ -550,7 +550,7 @@ public abstract class RssInputStream extends InputStream {
       }
 
       if (callback != null) {
-        callback.incReadTime(System.currentTimeMillis() - startTime);
+        callback.incReadTime(System.nanoTime() - startTime);
       }
       return hasData;
     }

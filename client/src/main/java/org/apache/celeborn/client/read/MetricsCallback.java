@@ -20,5 +20,8 @@ package org.apache.celeborn.client.read;
 public interface MetricsCallback {
   void incBytesRead(long bytesRead);
 
+  /**
+   * @param time time in nanosecond
+   */
   void incReadTime(long time);
 }

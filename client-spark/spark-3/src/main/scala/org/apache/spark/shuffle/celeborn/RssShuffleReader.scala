@@ -78,7 +78,7 @@ class RssShuffleReader[K, C](
 
     val recordIter = (startPartition until endPartition).iterator.map(partitionId => {
       if (handle.numMappers > 0) {
-        val start = System.currentTimeMillis()
+        val start = System.nanoTime()
         val inputStream = rssShuffleClient.readPartition(
           handle.appUniqueId,
           handle.shuffleId,
@@ -86,7 +86,7 @@ class RssShuffleReader[K, C](
           context.attemptNumber(),
           startMapIndex,
           endMapIndex)
-        metricsCallback.incReadTime(System.currentTimeMillis() - start)
+        metricsCallback.incReadTime(System.nanoTime() - start)
         inputStream.setCallback(metricsCallback)
         // ensure inputStream is closed when task completes
         context.addTaskCompletionListener[Unit](_ => inputStream.close())
