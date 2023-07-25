@@ -111,7 +111,18 @@ object CelebornCommonSettings {
       "-Xmx4g"
     ),
 
-    Test / envVars += ("IS_TESTING", "1")
+    Test / envVars += ("IS_TESTING", "1"),
+
+    // define copy jars task
+    copyJarsTask := {
+      val dir = baseDirectory.value / "target" / s"scala-${scalaBinaryVersion.value}" / "jars"
+      println(dir.toPath)
+      Files.createDirectories(dir.toPath)
+
+      (Compile / managedClasspath).value.files.foreach { f =>
+        IO.copyFile(f, dir / f.getName)
+      }
+    }
   )
 
   lazy val protoSettings = Seq(
@@ -128,6 +139,8 @@ object CelebornCommonSettings {
     "junit" % "junit" % "4.12" % "test",
     // https://www.scala-sbt.org/1.x/docs/Testing.html
     "com.github.sbt" % "junit-interface" % "0.13.3" % "test")
+
+  val copyJarsTask = TaskKey[Unit]("copy-jars", "Copys jars")
 }
 
 object CelebornBuild extends sbt.internal.BuildDef {
