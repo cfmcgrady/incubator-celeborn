@@ -23,7 +23,7 @@ set -x
 PROJECT_DIR="$(cd "`dirname "$0"`/.."; pwd)"
 DIST_DIR="$PROJECT_DIR/dist"
 NAME="bin"
-RELEASE="false"
+RELEASE="true"
 
 function exit_with_usage {
   echo "make-distribution.sh - tool for making binary distributions of Celeborn"
@@ -89,7 +89,9 @@ fi
 MVN="$PROJECT_DIR/build/mvn"
 export MAVEN_OPTS="${MAVEN_OPTS:--Xmx2g -XX:ReservedCodeCacheSize=1g}"
 
-if [ ! "$(command -v "$MVN")" ] ; then
+SBT="$PROJECT_DIR/build/sbt"
+
+if [ ! "$(command -v "$SBT")" ] ; then
     echo -e "Could not locate Maven command: '$MVN'."
     exit -1;
 fi
@@ -111,14 +113,9 @@ mkdir -p "$DIST_DIR"
 MVN_DIST_OPT="-DskipTests -Dmaven.javadoc.skip=true -Dmaven.source.skip"
 
 function build_service {
-  VERSION=$("$MVN" help:evaluate -Dexpression=project.version $@ 2>/dev/null \
-      | grep -v "INFO" \
-      | grep -v "WARNING" \
-      | tail -n 1)
-  SCALA_VERSION=$("$MVN" help:evaluate -Dexpression=scala.binary.version $@ 2>/dev/null \
-      | grep -v "INFO" \
-      | grep -v "WARNING" \
-      | tail -n 1)
+  VERSION=$("$SBT" "Show / version" | awk '/\[info\]/{ver=$2} END{print ver}')
+
+  SCALA_VERSION=$("$SBT" "Show / scalaBinaryVersion" | awk '/\[info\]/{ver=$2} END{print ver}')
 
   echo "Celeborn version is $VERSION"
   echo "Making apache-celeborn-$VERSION-$NAME.tgz"
@@ -126,10 +123,7 @@ function build_service {
   echo "Celeborn $VERSION$GITREVSTRING" > "$DIST_DIR/RELEASE"
   echo "Build flags: $@" >> "$DIST_DIR/RELEASE"
 
-  # Store the command as an array because $MVN variable might have spaces in it.
-  # Normal quoting tricks don't work.
-  # See: http://mywiki.wooledge.org/BashFAQ/050
-  BUILD_COMMAND=("$MVN" clean package $MVN_DIST_OPT -pl master,worker -am $@)
+  BUILD_COMMAND=("$SBT" clean package $@)
 
   # Actually build the jar
   echo -e "\nBuilding with..."
@@ -137,18 +131,25 @@ function build_service {
 
   "${BUILD_COMMAND[@]}"
 
+  COPY_JAR_COMMAND=("$SBT" copyJars)
+
+  # Actually build the jar
+  echo -e "\$ ${COPY_JAR_COMMAND[@]}\n"
+
+  "${COPY_JAR_COMMAND[@]}"
+
   mkdir -p "$DIST_DIR/jars"
   mkdir -p "$DIST_DIR/master-jars"
   mkdir -p "$DIST_DIR/worker-jars"
 
   ## Copy master jars
-  cp "$PROJECT_DIR"/master/target/celeborn-master_$SCALA_VERSION-$VERSION.jar "$DIST_DIR/master-jars/"
+  cp "$PROJECT_DIR"/master/target/scala-$SCALA_VERSION/celeborn-master_$SCALA_VERSION-$VERSION.jar "$DIST_DIR/master-jars/"
   cp "$PROJECT_DIR"/master/target/scala-$SCALA_VERSION/jars/*.jar "$DIST_DIR/jars/"
   for jar in $(ls "$PROJECT_DIR/master/target/scala-$SCALA_VERSION/jars"); do
     (cd $DIST_DIR/master-jars; ln -snf "../jars/$jar" .)
   done
   ## Copy worker jars
-  cp "$PROJECT_DIR"/worker/target/celeborn-worker_$SCALA_VERSION-$VERSION.jar "$DIST_DIR/worker-jars/"
+  cp "$PROJECT_DIR"/worker/target/scala-$SCALA_VERSION/celeborn-worker_$SCALA_VERSION-$VERSION.jar "$DIST_DIR/worker-jars/"
   cp "$PROJECT_DIR"/worker/target/scala-$SCALA_VERSION/jars/*.jar "$DIST_DIR/jars/"
   for jar in $(ls "$PROJECT_DIR/worker/target/scala-$SCALA_VERSION/jars"); do
     (cd $DIST_DIR/worker-jars; ln -snf "../jars/$jar" .)
@@ -216,11 +217,11 @@ function build_flink_client {
 
 if [ "$RELEASE" == "true" ]; then
   build_service
-  build_spark_client -Pspark-2.4
-  build_spark_client -Pspark-3.4
-  build_flink_client -Pflink-1.14
-  build_flink_client -Pflink-1.15
-  build_flink_client -Pflink-1.17
+  # build_spark_client -Pspark-2.4
+  #build_spark_client -Pspark-3.4
+  #build_flink_client -Pflink-1.14
+  #build_flink_client -Pflink-1.15
+  #build_flink_client -Pflink-1.17
 else
   ## build release package on demand
   build_service $@

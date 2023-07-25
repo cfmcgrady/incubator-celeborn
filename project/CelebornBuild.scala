@@ -295,7 +295,7 @@ object CelebornService {
   lazy val service = (project in file("service"))
     .dependsOn(CelebornCommon.common)
     .settings (
-      name := "service",
+      name := "celeborn-service",
       commonSettings,
       libraryDependencies ++= Seq(
         "com.google.code.findbugs" % "jsr305" % findbugsVersion,
@@ -319,7 +319,7 @@ object CelebornMaster {
   lazy val master = (project in file("master"))
     .dependsOn(CelebornCommon.common, CelebornService.service)
     .settings (
-      name := "master",
+      name := "celeborn-master",
       commonSettings,
       protoSettings,
       libraryDependencies ++= Seq(
@@ -350,7 +350,7 @@ object CelebornWorker {
     .dependsOn(CelebornClient.client % "test->test;compile->compile")
     .dependsOn(CelebornMaster.master % "test->test;compile->compile")
     .settings (
-      name := "worker",
+      name := "celeborn-worker",
       commonSettings,
       libraryDependencies ++= Seq(
         "com.google.guava" % "guava" % guavaVersion,
