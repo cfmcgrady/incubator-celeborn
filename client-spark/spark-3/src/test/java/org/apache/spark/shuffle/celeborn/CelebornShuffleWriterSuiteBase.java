@@ -98,7 +98,7 @@ public abstract class CelebornShuffleWriterSuiteBase {
 
   private final int numMaps = 10;
   private final int numPartitions = 10;
-  private final SparkConf sparkConf = new SparkConf(false);
+  private final SparkConf sparkConf = new SparkConf(false).set("spark.buffer.pageSize", "2k");
   private final BlockManagerId bmId = BlockManagerId.apply("execId", "host", 1, None$.empty());
 
   private final TaskMemoryManager taskMemoryManager =
@@ -175,8 +175,22 @@ public abstract class CelebornShuffleWriterSuiteBase {
   public void testMergeSmallBlockWithFastWrite() throws Exception {
     final UnsafeRowSerializer serializer = new UnsafeRowSerializer(2, null);
     final CelebornConf conf =
-        new CelebornConf().set(CelebornConf.CLIENT_PUSH_BUFFER_MAX_SIZE().key(), "1024");
-    check(10000, conf, serializer);
+        new CelebornConf().set(CelebornConf.CLIENT_PUSH_BUFFER_MAX_SIZE().key(), "1024")
+            .set(CelebornConf.CLIENT_PUSH_SORT_MEMORY_THRESHOLD().key(), "4k")
+            .set("celeborn.client.spark.push.sort.pipeline.enabled", "true");
+
+    check(100000, conf, serializer);
+    for (int i = 0; i < 4; i ++) {
+      Thread t = new Thread("t-" + i) {
+        @Override public void run() {
+          try {
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        }
+      };
+      t.start();
+    }
   }
 
   @Test

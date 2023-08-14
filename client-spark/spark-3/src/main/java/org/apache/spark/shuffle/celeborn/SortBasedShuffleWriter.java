@@ -19,6 +19,7 @@ package org.apache.spark.shuffle.celeborn;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 
 import scala.Option;
@@ -100,7 +101,6 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
       CelebornConf conf,
       ShuffleClient client,
       ShuffleWriteMetricsReporter metrics,
-      ExecutorService executorService,
       SendBufferPool sendBufferPool)
       throws IOException {
     this.mapId = taskContext.partitionId();
@@ -128,6 +128,8 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
     pipelined = conf.clientPushSortPipelineEnabled();
 
     if (pipelined) {
+//      System.out.println("ddddddd....");
+      PipelinedPushWorker pipelinedPushWorker = new PipelinedPushWorker(mapId);
       for (int i = 0; i < pushers.length; i++) {
         pushers[i] =
             new SortBasedPusher(
@@ -144,7 +146,7 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
                 mapStatusLengths,
                 conf.clientPushSortMemoryThreshold() / 2,
                 sharedPushLock,
-                executorService,
+                pipelinedPushWorker,
                 sendBufferPool);
       }
       currentPusher = pushers[0];
@@ -175,7 +177,6 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
       CelebornConf conf,
       ShuffleClient client,
       ShuffleWriteMetricsReporter metrics,
-      ExecutorService executorService,
       SendBufferPool sendBufferPool)
       throws IOException {
     this(
@@ -185,7 +186,6 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
         conf,
         client,
         metrics,
-        executorService,
         sendBufferPool);
   }
 

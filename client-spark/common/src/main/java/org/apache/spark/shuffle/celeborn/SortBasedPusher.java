@@ -19,11 +19,14 @@ package org.apache.spark.shuffle.celeborn;
 
 import java.io.IOException;
 import java.util.LinkedList;
-import java.util.concurrent.ExecutorService;
+import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 
+import org.apache.celeborn.common.exception.CelebornIOException;
 import org.apache.spark.memory.MemoryConsumer;
 import org.apache.spark.memory.SparkOutOfMemoryError;
 import org.apache.spark.memory.TaskMemoryManager;
@@ -72,7 +75,7 @@ public class SortBasedPusher extends MemoryConsumer {
   private volatile boolean asyncPushing = false;
   private int[] shuffledPartitions = null;
   private int[] inversedShuffledPartitions = null;
-  private final ExecutorService executorService;
+  private final PipelinedPushWorker pipelinedPushWorker;
   private final SendBufferPool sendBufferPool;
 
   public SortBasedPusher(
@@ -89,7 +92,7 @@ public class SortBasedPusher extends MemoryConsumer {
       LongAdder[] mapStatusLengths,
       long pushSortMemoryThreshold,
       Object sharedPushLock,
-      ExecutorService executorService,
+      PipelinedPushWorker pipelinedPushWorker,
       SendBufferPool sendBufferPool) {
     super(
         memoryManager,
@@ -141,7 +144,7 @@ public class SortBasedPusher extends MemoryConsumer {
     this.inMemSorter = new ShuffleInMemorySorter(this, initialSize);
     this.peakMemoryUsedBytes = getMemoryUsage();
     this.sharedPushLock = sharedPushLock;
-    this.executorService = executorService;
+    this.pipelinedPushWorker = pipelinedPushWorker;
   }
 
   public long pushData() throws IOException {
@@ -267,17 +270,10 @@ public class SortBasedPusher extends MemoryConsumer {
   }
 
   public void triggerPush() throws IOException {
+//    System.out.println("triggerPush: " + Thread.currentThread().getName());
     asyncPushing = true;
     dataPusher.checkException();
-    executorService.submit(
-        () -> {
-          try {
-            pushData();
-            asyncPushing = false;
-          } catch (IOException ie) {
-            dataPusher.setException(ie);
-          }
-        });
+    pipelinedPushWorker.add(this);
   }
 
   /**
@@ -288,6 +284,7 @@ public class SortBasedPusher extends MemoryConsumer {
    */
   public void waitPushFinish() throws IOException {
     dataPusher.checkException();
+    pipelinedPushWorker.checkException();
     while (asyncPushing) {
       try {
         Thread.sleep(50);
@@ -455,5 +452,78 @@ public class SortBasedPusher extends MemoryConsumer {
   @Override
   public long getUsed() {
     return super.getUsed();
+  }
+
+  public void pipelinePushed() {
+    asyncPushing = false;
+  }
+
+  public boolean getAsyncPushing() {
+    return asyncPushing;
+  }
+}
+
+class PipelinedPushWorker {
+
+  private static final Logger logger = LoggerFactory.getLogger(PipelinedPushWorker.class);
+
+  private volatile boolean terminated;
+  private final AtomicReference<IOException> exceptionRef = new AtomicReference<>();
+  private Thread asyncPushWorker;
+  private ArrayBlockingQueue<SortBasedPusher> pushers = new ArrayBlockingQueue<>(1000);
+
+  public PipelinedPushWorker(int index) {
+    asyncPushWorker = new Thread("async-push-" + index) {
+      @Override public void run() {
+        SortBasedPusher currentPusher = null;
+        while (stillRunning()) {
+          try {
+            if (currentPusher != null) {
+              //            System.out.println("currentPusher: " + currentPusher);
+//              if (currentPusher.getAsyncPushing()) {
+//              System.out.println("start push, index: " + index);
+              currentPusher.pushData();
+//              System.out.println("finished push, index: " + index);
+              currentPusher.pipelinePushed();
+//              }
+            }
+            currentPusher = pushers.take();
+          } catch (IOException e) {
+            logger.error("catch IOE when async push!", e);
+            exceptionRef.set(new CelebornIOException(e));
+          } catch (InterruptedException e) {
+            logger.error("pipelined push thread interrupted while pushing data.");
+            break;
+          }
+        }
+      }
+    };
+    asyncPushWorker.setDaemon(true);
+    asyncPushWorker.start();
+
+  }
+
+  public void add(SortBasedPusher pusher) throws IOException {
+    checkException();
+    pushers.add(pusher);
+//    try {
+//      pushers.put(pusher);
+//    } catch (InterruptedException e) {
+//      logger.error("catch xxx", e);
+//    }
+  }
+
+//  public void start() {
+//    this.asyncPushWorker.start();
+//  }
+
+  public void checkException() throws IOException {
+    if (exceptionRef.get() != null) {
+      throw exceptionRef.get();
+    }
+  }
+
+  protected boolean stillRunning() {
+    return !terminated && !Objects.nonNull(exceptionRef.get());
   }
 }

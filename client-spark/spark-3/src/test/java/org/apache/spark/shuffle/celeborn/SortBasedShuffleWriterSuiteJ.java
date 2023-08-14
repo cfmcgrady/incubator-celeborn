@@ -18,7 +18,9 @@
 package org.apache.spark.shuffle.celeborn;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
 
+import org.apache.celeborn.common.util.ThreadUtils;
 import org.apache.spark.TaskContext;
 import org.apache.spark.shuffle.ShuffleWriteMetricsReporter;
 import org.apache.spark.shuffle.ShuffleWriter;
@@ -27,6 +29,7 @@ import org.apache.celeborn.client.ShuffleClient;
 import org.apache.celeborn.common.CelebornConf;
 
 public class SortBasedShuffleWriterSuiteJ extends CelebornShuffleWriterSuiteBase {
+  ExecutorService es = ThreadUtils.newDaemonSingleThreadExecutor("async-pusher");
   @Override
   protected ShuffleWriter<Integer, String> createShuffleWriter(
       CelebornShuffleHandle handle,
@@ -35,7 +38,10 @@ public class SortBasedShuffleWriterSuiteJ extends CelebornShuffleWriterSuiteBase
       ShuffleClient client,
       ShuffleWriteMetricsReporter metrics)
       throws IOException {
+
     return new SortBasedShuffleWriter<Integer, String, String>(
-        handle, context, conf, client, metrics, null, SendBufferPool.get(4, 30, 60));
+        handle, context, conf, client, metrics,
+//        es,
+        SendBufferPool.get(4, 30, 60));
   }
 }
