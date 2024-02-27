@@ -527,8 +527,6 @@ private[celeborn] class Worker(
 
   private def handleResourceConsumption(): util.Map[UserIdentifier, ResourceConsumption] = {
     val resourceConsumptionSnapshot = storageManager.userResourceConsumptionSnapshot()
-    val userResourceConsumptions =
-      workerInfo.updateThenGetUserResourceConsumption(resourceConsumptionSnapshot.asJava)
     resourceConsumptionSnapshot.foreach { case (userIdentifier, userResourceConsumption) =>
       gaugeResourceConsumption(userIdentifier)
       val subResourceConsumptions = userResourceConsumption.subResourceConsumptions
@@ -536,7 +534,7 @@ private[celeborn] class Worker(
         subResourceConsumptions.asScala.keys.foreach { gaugeResourceConsumption(userIdentifier, _) }
       }
     }
-    userResourceConsumptions
+    workerInfo.updateThenGetUserResourceConsumption(resourceConsumptionSnapshot.asJava)
   }
 
   private def gaugeResourceConsumption(
@@ -570,15 +568,14 @@ private[celeborn] class Worker(
   private def computeResourceConsumption(
       userIdentifier: UserIdentifier,
       applicationId: String = null): ResourceConsumption = {
-    var resourceConsumption =
-      workerInfo.userResourceConsumption.getOrDefault(
-        userIdentifier,
-        ResourceConsumption(0, 0, 0, 0))
+    var resourceConsumption = workerInfo.userResourceConsumption.get(userIdentifier)
     if (applicationId != null) {
       val subResourceConsumptions = resourceConsumption.subResourceConsumptions
-      if (CollectionUtils.isNotEmpty(subResourceConsumptions)) {
-        resourceConsumption =
-          subResourceConsumptions.getOrDefault(applicationId, ResourceConsumption(0, 0, 0, 0))
+      if (CollectionUtils.isNotEmpty(subResourceConsumptions)
+        && subResourceConsumptions.containsKey(applicationId)) {
+        resourceConsumption = subResourceConsumptions.get(applicationId)
+      } else {
+        resourceConsumption = ResourceConsumption(0, 0, 0, 0)
       }
     }
     resourceConsumption
