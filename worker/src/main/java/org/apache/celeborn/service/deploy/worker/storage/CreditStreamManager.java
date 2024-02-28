@@ -76,7 +76,6 @@ public class CreditStreamManager {
   public long registerStream(
       Consumer<Long> notifyStreamHandlerCallback,
       Channel channel,
-      String shuffleKey,
       int initialCredit,
       int startSubIndex,
       int endSubIndex,
@@ -111,7 +110,7 @@ public class CreditStreamManager {
                 }
               }
               initializeStreamStateAndPartitionReader(
-                  channel, shuffleKey, startSubIndex, endSubIndex, fileInfo, streamId, v);
+                  channel, startSubIndex, endSubIndex, fileInfo, streamId, v);
               return v;
             });
     if (exception.get() != null) {
@@ -129,14 +128,12 @@ public class CreditStreamManager {
 
   private void initializeStreamStateAndPartitionReader(
       Channel channel,
-      String shuffleKey,
       int startSubIndex,
       int endSubIndex,
       FileInfo fileInfo,
       long streamId,
       MapDataPartition mapDataPartition) {
-    StreamState streamState =
-        new StreamState(channel, shuffleKey, fileInfo.getBufferSize(), mapDataPartition);
+    StreamState streamState = new StreamState(channel, fileInfo.getBufferSize(), mapDataPartition);
     streams.put(streamId, streamState);
     mapDataPartition.setupDataPartitionReader(startSubIndex, endSubIndex, streamId, channel);
   }
@@ -183,10 +180,6 @@ public class CreditStreamManager {
   @VisibleForTesting
   public ConcurrentHashMap<Long, StreamState> getStreams() {
     return streams;
-  }
-
-  public String getStreamShuffleKey(Long streamId) {
-    return streams.get(streamId).getShuffleKey();
   }
 
   private void startRecycleThread() {
@@ -248,27 +241,18 @@ public class CreditStreamManager {
 
   protected class StreamState {
     private Channel associatedChannel;
-    private String shuffleKey;
     private int bufferSize;
     private MapDataPartition mapDataPartition;
 
     public StreamState(
-        Channel associatedChannel,
-        String shuffleKey,
-        int bufferSize,
-        MapDataPartition mapDataPartition) {
+        Channel associatedChannel, int bufferSize, MapDataPartition mapDataPartition) {
       this.associatedChannel = associatedChannel;
-      this.shuffleKey = shuffleKey;
       this.bufferSize = bufferSize;
       this.mapDataPartition = mapDataPartition;
     }
 
     public Channel getAssociatedChannel() {
       return associatedChannel;
-    }
-
-    public String getShuffleKey() {
-      return shuffleKey;
     }
 
     public int getBufferSize() {
