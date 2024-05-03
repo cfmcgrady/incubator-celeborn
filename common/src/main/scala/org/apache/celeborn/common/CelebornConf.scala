@@ -866,6 +866,15 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def shufflePartitionType: PartitionType = PartitionType.valueOf(get(SHUFFLE_PARTITION_TYPE))
   def shuffleRangeReadFilterEnabled: Boolean = get(SHUFFLE_RANGE_READ_FILTER_ENABLED)
   def shuffleForceFallbackEnabled: Boolean = get(SPARK_SHUFFLE_FORCE_FALLBACK_ENABLED)
+  def shuffleFallbackPolicy: FallbackPolicy = {
+    val fallbackPolicyGiven = FallbackPolicy.valueOf(get(SPARK_SHUFFLE_FALLBACK_POLICY))
+    if (shuffleForceFallbackEnabled && FallbackPolicy.AUTO.equals(fallbackPolicyGiven)) {
+      FallbackPolicy.ALWAYS
+    } else {
+      fallbackPolicyGiven
+    }
+  }
+
   def shuffleForceFallbackPartitionThreshold: Long =
     get(SPARK_SHUFFLE_FORCE_FALLBACK_PARTITION_THRESHOLD)
   def shuffleExpiredCheckIntervalMs: Long = get(SHUFFLE_EXPIRED_CHECK_INTERVAL)
@@ -1166,7 +1175,15 @@ object CelebornConf extends Logging {
       DeprecatedConfig(
         "celeborn.worker.storage.baseDir.number",
         "0.4.0",
-        "Please use celeborn.worker.storage.dirs"))
+        "Please use celeborn.worker.storage.dirs"),
+      DeprecatedConfig(
+        "celeborn.client.spark.shuffle.forceFallback.enabled",
+        "0.5.0",
+        "Please use celeborn.client.spark.shuffle.fallback.policy"),
+      DeprecatedConfig(
+        "celeborn.shuffle.forceFallback.enabled",
+        "0.5.0",
+        "Please use celeborn.client.spark.shuffle.fallback.policy"))
 
     Map(configs.map { cfg => (cfg.key -> cfg) }: _*)
   }
@@ -3890,12 +3907,28 @@ object CelebornConf extends Logging {
       .booleanConf
       .createWithDefault(true)
 
+  val SPARK_SHUFFLE_FALLBACK_POLICY: ConfigEntry[String] =
+    buildConf("celeborn.client.spark.shuffle.fallback.policy")
+      .categories("client")
+      .version("0.5.0")
+      .doc(
+        s"Celeborn supports the following kind of fallback policies. 1. ${FallbackPolicy.ALWAYS.name}: force fallback shuffle to Spark's default; " +
+          s"2. ${FallbackPolicy.AUTO.name}: consider other factors like availability of enough workers and quota, or whether shuffle of partition number is lower than celeborn.client.spark.shuffle.forceFallback.numPartitionsThreshold; " +
+          s"3. ${FallbackPolicy.NEVER.name}: the job will fail if it is concluded that fallback is required based on factors above.")
+      .stringConf
+      .transform(_.toUpperCase(Locale.ROOT))
+      .checkValues(Set(
+        FallbackPolicy.ALWAYS.name,
+        FallbackPolicy.AUTO.name,
+        FallbackPolicy.NEVER.name))
+      .createWithDefault(FallbackPolicy.AUTO.name)
+
   val SPARK_SHUFFLE_FORCE_FALLBACK_ENABLED: ConfigEntry[Boolean] =
     buildConf("celeborn.client.spark.shuffle.forceFallback.enabled")
       .withAlternative("celeborn.shuffle.forceFallback.enabled")
       .categories("client")
       .version("0.3.0")
-      .doc("Whether force fallback shuffle to Spark's default.")
+      .doc(s"Whether force fallback shuffle to Spark's default. This configuration only takes effect when ${CelebornConf.SPARK_SHUFFLE_FALLBACK_POLICY.key} is ${FallbackPolicy.AUTO.name}.")
       .booleanConf
       .createWithDefault(false)
 
@@ -3905,7 +3938,7 @@ object CelebornConf extends Logging {
       .categories("client")
       .version("0.3.0")
       .doc(
-        "Celeborn will only accept shuffle of partition number lower than this configuration value.")
+        s"Celeborn will only accept shuffle of partition number lower than this configuration value. This configuration only takes effect when ${CelebornConf.SPARK_SHUFFLE_FALLBACK_POLICY.key} is ${FallbackPolicy.AUTO.name}.")
       .longConf
       .createWithDefault(Int.MaxValue)
 
