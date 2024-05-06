@@ -69,6 +69,7 @@ abstract class CommitHandler(
     val sharedRpcPool: ThreadPoolExecutor) extends Logging {
 
   private val pushReplicateEnabled = conf.clientPushReplicateEnabled
+  private val clientRpcCommitFilesAskTimeout = conf.clientRpcCommitFilesAskTimeout
 
   private val commitEpoch = new AtomicLong()
   private val totalWritten = new LongAdder
@@ -458,7 +459,7 @@ abstract class CommitHandler(
           message.replicaIds)
       }(ec)
     } else {
-      worker.endpoint.ask[CommitFilesResponse](message)
+      worker.endpoint.ask[CommitFilesResponse](message, clientRpcCommitFilesAskTimeout)
     }
   }
 
