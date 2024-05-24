@@ -219,7 +219,7 @@ class FetchHandler(
           // 1. when the current request is a non-range openStream, but the original unsorted file
           //    has been deleted by another range's openStream request.
           // 2. when the current request is a range openStream request.
-          if ((endIndex != Int.MaxValue) || (endIndex == Int.MaxValue && !fileInfo.addStream(
+          if ((endIndex != Int.MaxValue && endIndex != -1 && endIndex >= startIndex) || (endIndex == Int.MaxValue && !fileInfo.addStream(
               streamId))) {
             fileInfo = partitionsSorter.getSortedFileInfo(
               shuffleKey,
@@ -262,7 +262,13 @@ class FetchHandler(
               s"StreamId $streamId, fileName $fileName, numChunks ${fileInfo.numChunks}, " +
                 s"mapRange [$startIndex-$endIndex]. Received from client channel " +
                 s"${NettyUtils.getRemoteAddress(client.getChannel)}")
-            replyStreamHandler(client, rpcRequestId, streamId, fileInfo.numChunks(), isLegacy)
+            replyStreamHandler(
+              client,
+              rpcRequestId,
+              streamId,
+              fileInfo.numChunks(),
+              isLegacy,
+              fileInfo.getChunkOffsets)
           }
         case PartitionType.MAP =>
           val creditStreamHandler =

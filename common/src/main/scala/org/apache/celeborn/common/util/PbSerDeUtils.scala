@@ -31,6 +31,7 @@ import org.apache.celeborn.common.protocol._
 import org.apache.celeborn.common.protocol.PartitionLocation.Mode
 import org.apache.celeborn.common.protocol.message.ControlMessages.WorkerResource
 import org.apache.celeborn.common.quota.ResourceConsumption
+import org.apache.celeborn.common.write.PushFailedBatch
 
 object PbSerDeUtils {
 
@@ -408,5 +409,36 @@ object PbSerDeUtils {
         toPbAppDiskUsageSnapshot(currentAppDiskUsageMetricsSnapshot))
     }
     builder.build()
+  }
+
+  def toPbPushFailedBatch(pushFailedBatch: PushFailedBatch): PbPushFailedBatch = {
+    PbPushFailedBatch.newBuilder()
+      .setMapId(pushFailedBatch.getMapId)
+      .setAttemptId(pushFailedBatch.getAttemptId)
+      .setBatchId(pushFailedBatch.getBatchId)
+      .build()
+  }
+
+  def fromPbPushFailedBatch(pbPushFailedBatch: PbPushFailedBatch): PushFailedBatch = {
+    new PushFailedBatch(
+      pbPushFailedBatch.getMapId,
+      pbPushFailedBatch.getAttemptId,
+      pbPushFailedBatch.getBatchId)
+  }
+
+  def toPbPushFailedBatchSet(failedBatchSet: util.Set[PushFailedBatch]): PbPushFailedBatchSet = {
+    val builder = PbPushFailedBatchSet.newBuilder()
+    failedBatchSet.asScala.foreach(batch => builder.addFailureBatches(toPbPushFailedBatch(batch)))
+
+    builder.build()
+  }
+
+  def fromPbPushFailedBatchSet(pbFailedBatchSet: PbPushFailedBatchSet)
+      : util.Set[PushFailedBatch] = {
+    val failedBatchSet = new util.HashSet[PushFailedBatch]()
+    pbFailedBatchSet.getFailureBatchesList.asScala.foreach(batch =>
+      failedBatchSet.add(fromPbPushFailedBatch(batch)))
+
+    failedBatchSet
   }
 }

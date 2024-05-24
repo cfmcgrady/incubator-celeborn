@@ -20,12 +20,15 @@ package org.apache.celeborn.common.util
 import java.io.File
 import java.util
 
+import com.google.common.collect.Sets
+
 import org.apache.celeborn.CelebornFunSuite
 import org.apache.celeborn.common.identity.UserIdentifier
 import org.apache.celeborn.common.meta.{DeviceInfo, DiskInfo, FileInfo, WorkerInfo}
 import org.apache.celeborn.common.protocol.{PartitionLocation, StorageInfo}
 import org.apache.celeborn.common.protocol.message.ControlMessages.WorkerResource
 import org.apache.celeborn.common.quota.ResourceConsumption
+import org.apache.celeborn.common.write.PushFailedBatch
 
 class PbSerDeUtilsTest extends CelebornFunSuite {
 
@@ -219,6 +222,22 @@ class PbSerDeUtilsTest extends CelebornFunSuite {
     assert(restoredPartitionLocation3.equals(partitionLocation3))
     assert(restoredPartitionLocation4.equals(partitionLocation4))
     assert(restoredPartitionLocation4.getStorageInfo.equals(partitionLocation4.getStorageInfo))
+  }
+
+  test("fromAndToPushFailedBatch") {
+    val failedBatch = new PushFailedBatch(1, 1, 2)
+    val pbPushFailedBatch = PbSerDeUtils.toPbPushFailedBatch(failedBatch)
+    val restoredFailedBatch = PbSerDeUtils.fromPbPushFailedBatch(pbPushFailedBatch)
+
+    assert(restoredFailedBatch.equals(failedBatch))
+  }
+
+  test("fromAndToPushFailedBatchSet") {
+    val failedBatchSet = Sets.newHashSet(new PushFailedBatch(1, 1, 2), new PushFailedBatch(2, 2, 3))
+    val pbPushFailedBatchSet = PbSerDeUtils.toPbPushFailedBatchSet(failedBatchSet)
+    val restoredFailedBatchSet = PbSerDeUtils.fromPbPushFailedBatchSet(pbPushFailedBatchSet)
+
+    assert(restoredFailedBatchSet.equals(failedBatchSet))
   }
 
 }

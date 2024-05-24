@@ -55,6 +55,8 @@ public class WorkerPartitionReader implements PartitionReader {
 
   private int returnedChunks;
   private int chunkIndex;
+  private int startChunkIndex;
+  private int endChunkIndex;
 
   private final LinkedBlockingQueue<ByteBuf> results;
   private final ChunkReceivedCallback callback;
@@ -77,6 +79,8 @@ public class WorkerPartitionReader implements PartitionReader {
       TransportClientFactory clientFactory,
       int startMapIndex,
       int endMapIndex,
+      int startChunkIndex,
+      int endChunkIndex,
       int fetchChunkRetryCnt,
       int fetchChunkMaxRetry,
       MetricsCallback metricsCallback)
@@ -128,6 +132,12 @@ public class WorkerPartitionReader implements PartitionReader {
                 .toByteArray());
     ByteBuffer response = client.sendRpcSync(openStreamMsg.toByteBuffer(), fetchTimeoutMs);
     streamHandler = TransportMessage.fromByteBuffer(response).getParsedPayload();
+    this.startChunkIndex = startChunkIndex == -1 ? 0 : startChunkIndex;
+    this.endChunkIndex =
+        endChunkIndex == -1
+            ? streamHandler.getNumChunks() - 1
+            : Math.min(streamHandler.getNumChunks() - 1, endChunkIndex);
+    this.chunkIndex = this.startChunkIndex;
 
     this.location = location;
     this.clientFactory = clientFactory;
@@ -139,13 +149,13 @@ public class WorkerPartitionReader implements PartitionReader {
 
   @Override
   public boolean hasNext() {
-    return returnedChunks < streamHandler.getNumChunks();
+    return returnedChunks < endChunkIndex - startChunkIndex + 1;
   }
 
   @Override
   public ByteBuf next() throws IOException, InterruptedException {
     checkException();
-    if (chunkIndex < streamHandler.getNumChunks()) {
+    if (chunkIndex <= endChunkIndex) {
       fetchChunks();
     }
     ByteBuf chunk = null;
@@ -197,10 +207,10 @@ public class WorkerPartitionReader implements PartitionReader {
   }
 
   private void fetchChunks() throws IOException, InterruptedException {
-    final int inFlight = chunkIndex - returnedChunks;
+    final int inFlight = chunkIndex - startChunkIndex - returnedChunks;
     if (inFlight < fetchMaxReqsInFlight) {
       final int toFetch =
-          Math.min(fetchMaxReqsInFlight - inFlight + 1, streamHandler.getNumChunks() - chunkIndex);
+          Math.min(fetchMaxReqsInFlight - inFlight + 1, endChunkIndex + 1 - chunkIndex);
       for (int i = 0; i < toFetch; i++) {
         if (testFetch && fetchChunkRetryCnt < fetchChunkMaxRetry - 1 && chunkIndex == 3) {
           callback.onFailure(chunkIndex, new CelebornIOException("Test fetch chunk failure"));
