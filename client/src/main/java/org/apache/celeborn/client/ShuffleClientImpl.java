@@ -166,7 +166,7 @@ public class ShuffleClientImpl extends ShuffleClient {
   }
 
   // key: shuffleId
-  protected final Map<Integer, ReduceFileGroups> reduceFileGroupsMap =
+  protected final Map<Integer, Tuple2<ReduceFileGroups, String>> reduceFileGroupsMap =
       JavaUtils.newConcurrentHashMap();
 
   public ShuffleClientImpl(String appUniqueId, CelebornConf conf, UserIdentifier userIdentifier) {
@@ -1668,17 +1668,13 @@ public class ShuffleClientImpl extends ShuffleClient {
 
   protected ReduceFileGroups updateFileGroup(int shuffleId, int partitionId)
       throws CelebornIOException {
-    if (reduceFileGroupsMap.containsKey(shuffleId)) {
-      return reduceFileGroupsMap.get(shuffleId);
+    Tuple2<ReduceFileGroups, String> fileGroupTuple =
+        reduceFileGroupsMap.computeIfAbsent(shuffleId, (id) -> loadFileGroupInternal(shuffleId));
+    if (fileGroupTuple._1 == null) {
+      throw new CelebornIOException(
+          loadFileGroupException(shuffleId, partitionId, (fileGroupTuple._2)));
     } else {
-      Tuple2<ReduceFileGroups, String> fileGroups = loadFileGroupInternal(shuffleId);
-      ReduceFileGroups newGroups = fileGroups._1;
-      if (newGroups == null) {
-        throw new CelebornIOException(
-            loadFileGroupException(shuffleId, partitionId, fileGroups._2));
-      }
-      reduceFileGroupsMap.put(shuffleId, newGroups);
-      return newGroups;
+      return fileGroupTuple._1;
     }
   }
 
@@ -1734,7 +1730,7 @@ public class ShuffleClientImpl extends ShuffleClient {
   }
 
   @VisibleForTesting
-  public Map<Integer, ReduceFileGroups> getReduceFileGroupsMap() {
+  public Map<Integer, Tuple2<ReduceFileGroups, String>> getReduceFileGroupsMap() {
     return reduceFileGroupsMap;
   }
 
