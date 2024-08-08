@@ -1396,7 +1396,7 @@ object CelebornConf extends Logging {
       .version("0.2.0")
       .doc("Timeout for RPC lookup operations.")
       .timeConf(TimeUnit.MILLISECONDS)
-      .createWithDefaultString("30s")
+      .createWithDefaultString("120s")
 
   val RPC_ASK_TIMEOUT: ConfigEntry[Long] =
     buildConf("celeborn.rpc.askTimeout")
