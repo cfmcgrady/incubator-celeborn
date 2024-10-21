@@ -21,6 +21,7 @@ import java.util.Locale
 
 import scala.util.Properties
 
+import com.github.sbt.git.SbtGit.GitKeys._
 import sbtassembly.AssemblyPlugin.autoImport._
 import sbtprotoc.ProtocPlugin.autoImport._
 
@@ -163,6 +164,11 @@ object CelebornCommonSettings {
     fork := true,
     scalacOptions ++= Seq("-target:jvm-1.8"),
     javacOptions ++= Seq("-encoding", UTF_8.name(), "-source", "1.8", "-g"),
+    Compile / packageBin / packageOptions +=  Package.ManifestAttributes(
+      "Build-Jdk-Spec" -> System.getProperty("java.version"),
+      "Build-Revision" -> gitHeadCommit.value.getOrElse("N/A"),
+      "Build-Branch" -> gitCurrentBranch.value,
+      "Build-Time" -> java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ISO_DATE_TIME)),
   
     // -target cannot be passed as a parameter to javadoc. See https://github.com/sbt/sbt/issues/355
     Compile / compile / javacOptions ++= Seq("-target", "1.8"),
