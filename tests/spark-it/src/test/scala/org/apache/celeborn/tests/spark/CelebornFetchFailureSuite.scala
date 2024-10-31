@@ -20,9 +20,9 @@ package org.apache.celeborn.tests.spark
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-import org.apache.spark.{SparkConf, TaskContext}
+import org.apache.spark.{SparkConf, SparkContextHelper, TaskContext}
 import org.apache.spark.shuffle.ShuffleHandle
-import org.apache.spark.shuffle.celeborn.{CelebornShuffleHandle, ShuffleManagerHook, SparkUtils, TestCelebornShuffleManager}
+import org.apache.spark.shuffle.celeborn.{CelebornShuffleHandle, ShuffleManagerHook, SparkShuffleManager, SparkUtils, TestCelebornShuffleManager}
 import org.apache.spark.sql.SparkSession
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
