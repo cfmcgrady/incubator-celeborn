@@ -398,6 +398,10 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
     if (num != 0) num else availableCores
   }
 
+  def rpcSlowThresholdNS(): Long = get(RPC_SLOW_THRESHOLD)
+  def rpcSlowIntervalMS(): Long = get(RPC_SLOW_INTERVAL).getOrElse(-1)
+  def rpcDumpIntervalMS(): Long = get(RPC_TRACE_DUMP_INTERVAL)
+
   def networkIoMode(module: String): String = {
     val key = NETWORK_IO_MODE.key.replace("<module>", module)
     get(key, NETWORK_IO_MODE.defaultValue.get)
@@ -4408,4 +4412,28 @@ object CelebornConf extends Logging {
         "range. Please note that this feature requires the `Celeborn-Optimize-Skew-Partitions-spark3_3.patch`. ")
       .booleanConf
       .createWithDefault(false)
+
+  val RPC_SLOW_THRESHOLD: ConfigEntry[Long] =
+    buildConf("celeborn.rpc.slow.threshold")
+      .categories("network")
+      .doc("threshold for RPC framework to log slow RPC")
+      .version("0.6.0")
+      .timeConf(TimeUnit.NANOSECONDS)
+      .createWithDefaultString("1s")
+
+  val RPC_SLOW_INTERVAL: OptionalConfigEntry[Long] =
+    buildConf("celeborn.rpc.slow.interval")
+      .categories("network")
+      .doc("min interval (ms) for RPC framework to log slow RPC")
+      .version("0.6.0")
+      .timeConf(TimeUnit.MILLISECONDS)
+      .createOptional
+
+  val RPC_TRACE_DUMP_INTERVAL: ConfigEntry[Long] =
+    buildConf("celeborn.rpc.dump.interval")
+      .categories("network")
+      .doc("min interval (ms) for RPC framework to dump performance summary")
+      .version("0.6.0")
+      .timeConf(TimeUnit.MILLISECONDS)
+      .createWithDefaultString("60s")
 }

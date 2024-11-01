@@ -104,6 +104,8 @@ private[celeborn] class Master(
       new SingleMasterMetaManager(rpcEnv, conf)
     }
 
+  metricsSystem.registerSource(rpcEnv.rpcSource())
+
   // Threads
   private val forwardMessageThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("master-message-forwarder")

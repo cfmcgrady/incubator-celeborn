@@ -80,14 +80,14 @@ public abstract class CelebornInputStream extends InputStream {
         partitionLocationToChunkRange =
             CelebornPartitionUtil.splitSkewedPartitionLocations(
                 new ArrayList(Arrays.asList(locations)), startMapIndex, endMapIndex);
-        for (PartitionLocation l: locations) {
+        for (PartitionLocation l : locations) {
           System.out.print("id....." + l.getUniqueId());
-          for (long o: l.getStorageInfo().getChunkOffsets()) {
+          for (long o : l.getStorageInfo().getChunkOffsets()) {
             System.out.print(o + ", ");
           }
           System.out.println();
         }
-        for (String id: partitionLocationToChunkRange.keySet()) {
+        for (String id : partitionLocationToChunkRange.keySet()) {
           long left = partitionLocationToChunkRange.get(id).getLeft();
           long right = partitionLocationToChunkRange.get(id).getRight();
           System.out.println("id....." + id + " [ " + left + ", " + right + " ]");

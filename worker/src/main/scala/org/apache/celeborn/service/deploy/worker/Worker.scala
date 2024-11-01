@@ -116,6 +116,8 @@ private[celeborn] class Worker(
     }
   }
 
+  metricsSystem.registerSource(rpcEnv.rpcSource())
+
   val storageManager = new StorageManager(conf, workerSource)
 
   val memoryManager: MemoryManager = MemoryManager.initialize(conf)
