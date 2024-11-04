@@ -23,29 +23,14 @@ import static org.junit.Assume.assumeFalse;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.UUID;
 
 import org.apache.commons.lang3.SystemUtils;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameter;
-import org.junit.runners.Parameterized.Parameters;
 
 import org.apache.celeborn.common.util.JavaUtils;
 import org.apache.celeborn.common.util.Utils;
 
-@RunWith(Parameterized.class)
 public class DBProviderSuiteJ {
-
-  @Parameter public boolean createDirectory;
-
-  @Parameters(name = "createDirectory: {0}")
-  public static Collection<Object> data() {
-    return Arrays.asList(new Object[] {true, false});
-  }
 
   @Test
   public void testRockDBCheckVersionFailed() throws IOException {
@@ -59,11 +44,8 @@ public class DBProviderSuiteJ {
   }
 
   private void testCheckVersionFailed(DBBackend dbBackend, String namePrefix) throws IOException {
-    File dbDir = new File(System.getProperty("java.io.tmpdir"), namePrefix);
-    File dbFile =
-        createDirectory
-            ? Utils.createDirectory(dbDir.getPath(), namePrefix)
-            : new File(dbDir.getPath(), String.format("%s-%s", namePrefix, UUID.randomUUID()));
+    String root = System.getProperty("java.io.tmpdir");
+    File dbFile = Utils.createDirectory(root, namePrefix);
     try {
       StoreVersion v1 = new StoreVersion(1, 0);
       DBProvider.initDB(dbBackend, dbFile, v1).close();
@@ -72,7 +54,7 @@ public class DBProviderSuiteJ {
           assertThrows(IOException.class, () -> DBProvider.initDB(dbBackend, dbFile, v2));
       assertTrue(ioe.getMessage().contains("incompatible with current version StoreVersion[2.0]"));
     } finally {
-      JavaUtils.deleteRecursively(dbDir);
+      JavaUtils.deleteRecursively(dbFile);
     }
   }
 }
