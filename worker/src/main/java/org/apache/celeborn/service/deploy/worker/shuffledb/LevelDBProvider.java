@@ -21,7 +21,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 
-import org.apache.commons.io.FileUtils;
 import org.fusesource.leveldbjni.JniDBFactory;
 import org.fusesource.leveldbjni.internal.NativeDB;
 import org.iq80.leveldb.DB;
@@ -39,7 +38,8 @@ import org.apache.celeborn.common.util.PbSerDeUtils;
 public class LevelDBProvider {
   private static final Logger logger = LoggerFactory.getLogger(LevelDBProvider.class);
 
-  public static DB initLevelDB(File dbFile, StoreVersion version) throws IOException {
+  public static org.iq80.leveldb.DB initLevelDB(File dbFile, StoreVersion version)
+      throws IOException {
     org.iq80.leveldb.DB tmpDb = null;
     if (dbFile != null) {
       Options options = new Options();
@@ -50,7 +50,7 @@ public class LevelDBProvider {
       } catch (NativeDB.DBException e) {
         if (e.isNotFound() || e.getMessage().contains(" does not exist ")) {
           logger.info("Creating state database at " + dbFile);
-          createIfMissing(options, dbFile);
+          options.createIfMissing(true);
           try {
             tmpDb = JniDBFactory.factory.open(dbFile, options);
           } catch (NativeDB.DBException dbExc) {
@@ -60,21 +60,21 @@ public class LevelDBProvider {
           // the leveldb file seems to be corrupt somehow.  Lets just blow it away and create a new
           // one, so we can keep processing new apps
           logger.error(
-              "Error opening leveldb file {}.  Creating new file, will not be able to "
+              "error opening leveldb file {}.  Creating new file, will not be able to "
                   + "recover state for existing applications",
               dbFile,
               e);
           if (dbFile.isDirectory()) {
             for (File f : dbFile.listFiles()) {
               if (!f.delete()) {
-                logger.warn("Error deleting {}", f.getPath());
+                logger.warn("error deleting {}", f.getPath());
               }
             }
           }
           if (!dbFile.delete()) {
-            logger.warn("Error deleting {}", dbFile.getPath());
+            logger.warn("error deleting {}", dbFile.getPath());
           }
-          createIfMissing(options, dbFile);
+          options.createIfMissing(true);
           try {
             tmpDb = JniDBFactory.factory.open(dbFile, options);
           } catch (NativeDB.DBException dbExc) {
@@ -86,19 +86,6 @@ public class LevelDBProvider {
       checkVersion(tmpDb, version);
     }
     return tmpDb;
-  }
-
-  private static void createIfMissing(Options dbOptions, File dbFile) {
-    logger.info("Creating database file {} if missing", dbFile);
-    dbOptions.createIfMissing(true);
-    // LevelDB does not support creating non-existent multi-level directory.
-    if (!dbFile.exists()) {
-      try {
-        FileUtils.forceMkdir(dbFile);
-      } catch (IOException e) {
-        logger.warn("Failed to create database file {}", dbFile, e);
-      }
-    }
   }
 
   private static class LevelDBLogger implements org.iq80.leveldb.Logger {
@@ -115,26 +102,26 @@ public class LevelDBProvider {
    * Minor version differences are allowed -- meaning we should be able to read dbs that are either
    * earlier *or* later on the minor version.
    */
-  public static void checkVersion(DB db, StoreVersion newVersion) throws IOException {
+  public static void checkVersion(DB db, StoreVersion newversion) throws IOException {
     byte[] bytes = db.get(StoreVersion.KEY);
     if (bytes == null) {
-      storeVersion(db, newVersion);
+      storeVersion(db, newversion);
     } else {
       ArrayList<Integer> versions = PbSerDeUtils.fromPbStoreVersion(bytes);
       StoreVersion version = new StoreVersion(versions.get(0), versions.get(1));
-      if (version.major != newVersion.major) {
+      if (version.major != newversion.major) {
         throw new IOException(
-            "Cannot read state DB with version "
+            "cannot read state DB with version "
                 + version
                 + ", incompatible "
                 + "with current version "
-                + newVersion);
+                + newversion);
       }
-      storeVersion(db, newVersion);
+      storeVersion(db, newversion);
     }
   }
 
-  public static void storeVersion(DB db, StoreVersion version) {
+  public static void storeVersion(DB db, StoreVersion version) throws IOException {
     db.put(StoreVersion.KEY, PbSerDeUtils.toPbStoreVersion(version.major, version.minor));
   }
 }
