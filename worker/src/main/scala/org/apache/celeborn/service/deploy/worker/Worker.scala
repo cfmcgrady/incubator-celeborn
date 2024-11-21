@@ -534,22 +534,22 @@ private[celeborn] class Worker(
       resourceConsumptionSource.addGauge(
         ResourceConsumptionSource.DISK_FILE_COUNT,
         userIdentifier.toMap) { () =>
-        workerInfo.userResourceConsumption.get(userIdentifier).diskFileCount
+        workerInfo.userResourceConsumption.getOrDefault(userIdentifier, ResourceConsumption(0, 0, 0, 0)).diskFileCount
       }
       resourceConsumptionSource.addGauge(
         ResourceConsumptionSource.DISK_BYTES_WRITTEN,
         userIdentifier.toMap) { () =>
-        workerInfo.userResourceConsumption.get(userIdentifier).diskBytesWritten
+        workerInfo.userResourceConsumption.getOrDefault(userIdentifier, ResourceConsumption(0, 0, 0, 0)).diskBytesWritten
       }
       resourceConsumptionSource.addGauge(
         ResourceConsumptionSource.HDFS_FILE_COUNT,
         userIdentifier.toMap) { () =>
-        workerInfo.userResourceConsumption.get(userIdentifier).hdfsFileCount
+        workerInfo.userResourceConsumption.getOrDefault(userIdentifier, ResourceConsumption(0, 0, 0, 0)).hdfsFileCount
       }
       resourceConsumptionSource.addGauge(
         ResourceConsumptionSource.HDFS_BYTES_WRITTEN,
         userIdentifier.toMap) { () =>
-        workerInfo.userResourceConsumption.get(userIdentifier).hdfsBytesWritten
+        workerInfo.userResourceConsumption.getOrDefault(userIdentifier, ResourceConsumption(0, 0, 0, 0)).hdfsBytesWritten
       }
     }
     workerInfo.updateThenGetUserResourceConsumption(resourceConsumptionSnapshot.asJava)
