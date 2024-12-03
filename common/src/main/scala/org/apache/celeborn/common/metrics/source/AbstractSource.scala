@@ -95,10 +95,11 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
   }
 
   def addGauge[T](name: String, labels: Map[String, String] = Map.empty)(f: () => T): Unit = {
+    val supplier: MetricRegistry.MetricSupplier[Gauge[_]] = new GaugeSupplier[T](f)
     addGauge(
       name,
       labels,
-      metricRegistry.gauge(metricNameWithCustomizedLabels(name, labels), new GaugeSupplier[T](f)))
+      metricRegistry.gauge(metricNameWithCustomizedLabels(name, labels), supplier))
   }
 
   def addGauge[T](name: String, gauge: Gauge[T]): Unit = {
