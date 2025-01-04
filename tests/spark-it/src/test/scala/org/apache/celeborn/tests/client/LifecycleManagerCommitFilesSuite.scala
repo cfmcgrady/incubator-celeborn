@@ -153,7 +153,7 @@ class LifecycleManagerCommitFilesSuite extends WithShuffleClientSuite with MiniC
   test("CELEBORN-1319: test commit files and check commit info") {
     val shuffleId = nextShuffleId
     val conf = celebornConf.clone
-    conf.set(CelebornConf.TEST_CLIENT_MOCK_COMMIT_FILES_FAILURE.key, "false")
+    conf.set(CelebornConf.TEST_MOCK_COMMIT_FILES_FAILURE.key, "false")
     val lifecycleManager: LifecycleManager = new LifecycleManager(APP, conf)
     val shuffleClient = new ShuffleClientImpl(APP, conf, userIdentifier)
     shuffleClient.setupLifecycleManagerRef(lifecycleManager.self)
