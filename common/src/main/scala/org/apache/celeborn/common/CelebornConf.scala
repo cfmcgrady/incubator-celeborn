@@ -442,6 +442,11 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
     getInt(key, NETWORK_IO_CLIENT_THREADS.defaultValue.get)
   }
 
+  def networkIoConflictAvoidChooserEnable(module: String): Boolean = {
+    val key = NETWORK_IO_CLIENT_CONFLICT_AVOID_CHOOSER_ENALBE.key.replace("<module>", module)
+    getBoolean(key, NETWORK_IO_CLIENT_CONFLICT_AVOID_CHOOSER_ENALBE.defaultValue.get)
+  }
+
   def networkIoReceiveBuf(module: String): Int = {
     val key = NETWORK_IO_RECEIVE_BUFFER.key.replace("<module>", module)
     getSizeAsBytes(key, NETWORK_IO_RECEIVE_BUFFER.defaultValueString).toInt
@@ -1555,6 +1560,20 @@ object CelebornConf extends Logging {
         s"it works for worker fetch server.")
       .intConf
       .createWithDefault(0)
+
+  val NETWORK_IO_CLIENT_CONFLICT_AVOID_CHOOSER_ENALBE: ConfigEntry[Boolean] =
+    buildConf("celeborn.<module>.io.conflictAvoidChooser.enable")
+      .categories("network")
+      .doc("Whether to use conflict avoid event executor chooser in the client thread pool. " +
+        s"If setting <module> to `${TransportModuleConstants.RPC_MODULE}`, " +
+        s"it works for shuffle client. " +
+        s"If setting <module> to `${TransportModuleConstants.DATA_MODULE}`, " +
+        s"it works for shuffle client push and fetch data. " +
+        s"If setting <module> to `${TransportModuleConstants.REPLICATE_MODULE}`, " +
+        s"it works for replicate client of worker replicating data to peer worker.")
+      .version("0.4.0")
+      .booleanConf
+      .createWithDefault(false)
 
   val NETWORK_IO_CLIENT_THREADS: ConfigEntry[Int] =
     buildConf("celeborn.<module>.io.clientThreads")
