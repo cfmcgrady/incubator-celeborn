@@ -87,7 +87,7 @@ public class TransportClientFactory implements Closeable {
   private final int sendBuf;
   private final Class<? extends Channel> socketChannelClass;
   private EventLoopGroup workerGroup;
-  protected ByteBufAllocator pooledAllocator;
+  protected ByteBufAllocator allocator;
 
   public TransportClientFactory(
       TransportContext context, List<TransportClientBootstrap> clientBootstraps) {
@@ -110,7 +110,11 @@ public class TransportClientFactory implements Closeable {
             conf.clientThreads(),
             conf.conflictAvoidChooserEnable(),
             conf.getModuleName() + "-client");
-    this.pooledAllocator = NettyUtils.getPooledByteBufAllocator(conf, null, false);
+    // Always disable thread-local cache when creating pooled ByteBuf allocator for TransportClients
+    // because the ByteBufs are allocated by the event loop thread, but released by the executor
+    // thread rather than the event loop thread. Those thread-local caches actually delay the
+    // recycling of buffers, leading to larger memory usage.
+    this.allocator = NettyUtils.getByteBufAllocator(conf, null, false, conf.clientThreads());
   }
 
   /**
@@ -224,7 +228,7 @@ public class TransportClientFactory implements Closeable {
         .option(ChannelOption.TCP_NODELAY, true)
         .option(ChannelOption.SO_KEEPALIVE, true)
         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMs)
-        .option(ChannelOption.ALLOCATOR, pooledAllocator);
+        .option(ChannelOption.ALLOCATOR, allocator);
 
     if (receiveBuf > 0) {
       bootstrap.option(ChannelOption.SO_RCVBUF, receiveBuf);

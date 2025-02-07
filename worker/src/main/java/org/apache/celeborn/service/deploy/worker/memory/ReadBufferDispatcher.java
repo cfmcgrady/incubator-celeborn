@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.PooledByteBufAllocator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,7 @@ public class ReadBufferDispatcher extends Thread {
   private final Logger logger = LoggerFactory.getLogger(ReadBufferDispatcher.class);
   private final LinkedBlockingQueue<ReadBufferRequest> requests = new LinkedBlockingQueue<>();
   private final MemoryManager memoryManager;
-  private final PooledByteBufAllocator readBufferAllocator;
+  private final ByteBufAllocator readBufferAllocator;
   private final LongAdder allocatedReadBuffers = new LongAdder();
   private final long readBufferAllocationWait;
   private volatile boolean stopFlag = false;
@@ -45,7 +46,7 @@ public class ReadBufferDispatcher extends Thread {
     this.readBufferAllocationWait = conf.readBufferAllocationWait();
     // readBuffer is not a module name, it's a placeholder.
     readBufferAllocator =
-        NettyUtils.getPooledByteBufAllocator(new TransportConf("readBuffer", conf), null, true);
+        NettyUtils.getByteBufAllocator(new TransportConf("readBuffer", conf), null, true);
     this.memoryManager = memoryManager;
     this.setName("Read-Buffer-Dispatcher");
     this.start();
@@ -104,8 +105,10 @@ public class ReadBufferDispatcher extends Thread {
               TimeUnit.NANOSECONDS.toMillis(end - start));
           request.getBufferListener().notifyBuffers(buffers, null);
         } else {
-          // Free buffer pool memory to main direct memory when dispatcher is idle.
-          readBufferAllocator.trimCurrentThreadCache();
+          if (readBufferAllocator instanceof PooledByteBufAllocator) {
+            // Free buffer pool memory to main direct memory when dispatcher is idle.
+            ((PooledByteBufAllocator) readBufferAllocator).trimCurrentThreadCache();
+          }
         }
       } catch (Throwable e) {
         logger.error(e.getMessage(), e);

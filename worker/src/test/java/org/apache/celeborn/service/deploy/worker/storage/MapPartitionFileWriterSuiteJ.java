@@ -86,7 +86,7 @@ public class MapPartitionFileWriterSuiteJ {
             source,
             DeviceMonitor$.MODULE$.EmptyMonitor(),
             1,
-            NettyUtils.getPooledByteBufAllocator(new TransportConf("test", CONF), null, true),
+            NettyUtils.getByteBufAllocator(new TransportConf("test", CONF), null, true),
             256,
             "disk1",
             StorageInfo.Type.HDD,
