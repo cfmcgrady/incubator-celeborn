@@ -21,12 +21,15 @@ import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
 
 import io.netty.bootstrap.ServerBootstrap
-import io.netty.channel.{ChannelFuture, ChannelInitializer}
+import io.netty.channel.{ChannelFuture, ChannelInitializer, ChannelOption}
 import io.netty.channel.socket.nio.NioServerSocketChannel
 import io.netty.handler.logging.{LoggingHandler, LogLevel}
+import org.apache.commons.lang3.SystemUtils
 
+import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.internal.Logging
 import org.apache.celeborn.common.network.util.{IOMode, NettyUtils}
+import org.apache.celeborn.common.protocol.TransportModuleConstants
 import org.apache.celeborn.common.util.{CelebornExitKind, Utils}
 
 class HttpServer(
@@ -43,12 +46,24 @@ class HttpServer(
   def start(): Unit = synchronized {
     val boss = NettyUtils.createEventLoop(IOMode.NIO, 1, role + "-http-boss")
     val worker = NettyUtils.createEventLoop(IOMode.NIO, 2, role + "-http-worker")
+    val isWin: java.lang.Boolean = !SystemUtils.IS_OS_WINDOWS
+
+    val conf = Utils.fromCelebornConf(
+      new CelebornConf(),
+      TransportModuleConstants.HTTP_MODULE,
+      Math.max(64, Runtime.getRuntime.availableProcessors()))
+    val allocator = NettyUtils.getByteBufAllocator(conf, null, false);
     bootstrap = new ServerBootstrap
     bootstrap
       .group(boss, worker)
       .handler(new LoggingHandler(LogLevel.DEBUG))
       .channel(classOf[NioServerSocketChannel])
       .childHandler(channelInitializer)
+      .option(ChannelOption.ALLOCATOR, allocator)
+      .option(ChannelOption.SO_REUSEADDR, isWin)
+      .childOption(ChannelOption.TCP_NODELAY, java.lang.Boolean.TRUE)
+      .childOption(ChannelOption.SO_KEEPALIVE, java.lang.Boolean.TRUE)
+      .childOption(ChannelOption.ALLOCATOR, allocator);
 
     val address = new InetSocketAddress(host, port)
     bindFuture = bootstrap.bind(address).sync

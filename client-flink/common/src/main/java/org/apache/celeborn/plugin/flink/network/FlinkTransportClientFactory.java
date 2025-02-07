@@ -43,7 +43,7 @@ public class FlinkTransportClientFactory extends TransportClientFactory {
     super(context, Collections.emptyList());
     bufferSuppliers = JavaUtils.newConcurrentHashMap();
     this.fetchMaxRetries = fetchMaxRetries;
-    this.pooledAllocator = new UnpooledByteBufAllocator(true);
+    this.allocator = new UnpooledByteBufAllocator(true);
   }
 
   public TransportClient createClientWithRetry(String remoteHost, int remotePort)

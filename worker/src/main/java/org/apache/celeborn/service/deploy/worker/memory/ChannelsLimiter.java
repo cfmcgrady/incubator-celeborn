@@ -43,11 +43,13 @@ public class ChannelsLimiter extends ChannelDuplexHandler
   private final AtomicInteger needTrimChannels = new AtomicInteger(0);
   private final long waitTrimInterval;
   private final boolean allowCache;
+  private final boolean networkMemoryAllocatorPooled;
 
   public ChannelsLimiter(String moduleName, CelebornConf conf) {
     this.moduleName = moduleName;
     this.waitTrimInterval = conf.workerDirectMemoryTrimChannelWaitInterval();
     this.allowCache = conf.networkMemoryAllocatorAllowCache();
+    this.networkMemoryAllocatorPooled = conf.networkMemoryAllocatorPooled();
     MemoryManager memoryManager = MemoryManager.instance();
     memoryManager.registerMemoryListener(this);
   }
@@ -149,7 +151,7 @@ public class ChannelsLimiter extends ChannelDuplexHandler
 
   @Override
   public void onTrim() {
-    if (allowCache) {
+    if (networkMemoryAllocatorPooled && allowCache) {
       trimCache();
     }
   }
