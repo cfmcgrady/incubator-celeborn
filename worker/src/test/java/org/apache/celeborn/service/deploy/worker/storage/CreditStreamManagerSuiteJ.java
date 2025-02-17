@@ -78,6 +78,7 @@ public class CreditStreamManagerSuiteJ {
         new FileInfo(createTemporaryFileWithIndexFile(), new UserIdentifier("default", "default"));
     fileInfo.setNumSubpartitions(10);
     fileInfo.setBufferSize(1024);
+    fileInfo.setMountPoint("/tmp");
     Consumer<Long> streamIdConsumer = streamId -> Assert.assertTrue(streamId > 0);
 
     long registerStream1 =

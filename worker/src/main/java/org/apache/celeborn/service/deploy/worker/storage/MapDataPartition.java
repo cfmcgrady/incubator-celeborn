@@ -66,7 +66,7 @@ class MapDataPartition implements MemoryManager.ReadBufferTargetChangeListener {
   public MapDataPartition(
       int minReadBuffers,
       int maxReadBuffers,
-      HashMap<String, ExecutorService> storageFetcherPool,
+      ConcurrentHashMap<String, ExecutorService> storageFetcherPool,
       int threadsPerMountPoint,
       FileInfo fileInfo,
       Consumer<Long> recycleStream,

@@ -41,7 +41,7 @@ public class CreditStreamManager {
   private final AtomicLong nextStreamId;
   private final ConcurrentHashMap<Long, StreamState> streams;
   private final ConcurrentHashMap<FileInfo, MapDataPartition> activeMapPartitions;
-  private final HashMap<String, ExecutorService> storageFetcherPool = new HashMap<>();
+  private final ConcurrentHashMap<String, ExecutorService> storageFetcherPool = JavaUtils.newConcurrentHashMap();
   private int minReadBuffers;
   private int maxReadBuffers;
   private int threadsPerMountPoint;
