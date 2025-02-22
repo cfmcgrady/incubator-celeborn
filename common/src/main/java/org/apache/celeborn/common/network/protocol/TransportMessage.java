@@ -24,27 +24,11 @@ import java.nio.ByteBuffer;
 
 import com.google.protobuf.GeneratedMessageV3;
 import com.google.protobuf.InvalidProtocolBufferException;
+import org.apache.celeborn.common.protocol.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.celeborn.common.exception.CelebornIOException;
-import org.apache.celeborn.common.protocol.MessageType;
-import org.apache.celeborn.common.protocol.PbBacklogAnnouncement;
-import org.apache.celeborn.common.protocol.PbBufferStreamEnd;
-import org.apache.celeborn.common.protocol.PbChunkFetchRequest;
-import org.apache.celeborn.common.protocol.PbGetShuffleId;
-import org.apache.celeborn.common.protocol.PbGetShuffleIdResponse;
-import org.apache.celeborn.common.protocol.PbOpenStream;
-import org.apache.celeborn.common.protocol.PbPushDataHandShake;
-import org.apache.celeborn.common.protocol.PbReadAddCredit;
-import org.apache.celeborn.common.protocol.PbRegionFinish;
-import org.apache.celeborn.common.protocol.PbRegionStart;
-import org.apache.celeborn.common.protocol.PbReportShuffleFetchFailure;
-import org.apache.celeborn.common.protocol.PbReportShuffleFetchFailureResponse;
-import org.apache.celeborn.common.protocol.PbSaslRequest;
-import org.apache.celeborn.common.protocol.PbStreamChunkSlice;
-import org.apache.celeborn.common.protocol.PbStreamHandler;
-import org.apache.celeborn.common.protocol.PbTransportableError;
 
 public class TransportMessage implements Serializable {
   private static final long serialVersionUID = -3259000920699629773L;
@@ -105,6 +89,8 @@ public class TransportMessage implements Serializable {
         return (T) PbReportShuffleFetchFailureResponse.parseFrom(payload);
       case SASL_REQUEST_VALUE:
         return (T) PbSaslRequest.parseFrom(payload);
+      case PUSH_MERGED_DATA_SPLIT_PARTITION_INFO_VALUE:
+        return (T) PbPushMergedDataSplitPartitionInfo.parseFrom(payload);
       default:
         logger.error("Unexpected type {}", type);
     }

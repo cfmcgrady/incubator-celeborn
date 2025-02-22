@@ -505,6 +505,9 @@ object ControlMessages extends Logging {
     case pb: PbReportShuffleFetchFailureResponse =>
       new TransportMessage(MessageType.REPORT_SHUFFLE_FETCH_FAILURE_RESPONSE, pb.toByteArray)
 
+    case pb: PbPushMergedDataSplitPartitionInfo =>
+      new TransportMessage(MessageType.PUSH_MERGED_DATA_SPLIT_PARTITION_INFO, pb.toByteArray)
+
     case HeartbeatFromWorker(
           host,
           rpcPort,
@@ -1216,6 +1219,9 @@ object ControlMessages extends Logging {
 
       case CHECK_WORKERS_AVAILABLE_RESPONSE_VALUE =>
         PbCheckWorkersAvailableResponse.parseFrom(message.getPayload)
+
+      case PUSH_MERGED_DATA_SPLIT_PARTITION_INFO_VALUE =>
+        PbPushMergedDataSplitPartitionInfo.parseFrom(message.getPayload)
     }
   }
 }
