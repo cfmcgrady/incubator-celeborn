@@ -18,19 +18,20 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-worker-svc
+  name: {{ .Release.Name }}-master-svc
   labels:
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
     {{- include "celeborn.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+      protocol: TCP
+      name: celeborn-master
+    - port: {{ (index (include "celeborn.portMapping" . | fromYaml) (toString .Values.service.port)).metrics_master }}
+      targetPort: {{ (index (include "celeborn.portMapping" . | fromYaml) (toString .Values.service.port)).metrics_master }}
+      protocol: TCP
+      name: metrics
   clusterIP: None
   selector:
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-    app.kubernetes.io/role: worker
-    {{- include "celeborn.selectorLabels" . | nindent 4 }}
+    {{- include "celeborn.masterSelectorLabels" . | nindent 4 }}

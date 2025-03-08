@@ -15,4 +15,12 @@
 # limitations under the License.
 #
 
-Celeborn
+{{- if .Values.priorityClass.worker.create }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.priorityClass.worker.name | default (printf "%s-worker-priority" (.Release.Name)) }}
+  labels:
+    {{- include "celeborn.labels" . | nindent 4 }}
+value: {{ .Values.priorityClass.worker.value }}
+{{- end }}

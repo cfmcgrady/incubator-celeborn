@@ -15,8 +15,7 @@
 # limitations under the License.
 #
 
-ARG java_image_tag=8-jdk-focal
-FROM eclipse-temurin:${java_image_tag}
+FROM docker-reg.devops.xiaohongshu.com/data/celeborn:celeborn-base-1.0
 
 ARG celeborn_uid=10006
 ARG celeborn_gid=10006
@@ -25,14 +24,7 @@ ENV CELEBORN_HOME=/opt/celeborn
 ENV CELEBORN_PREFER_JEMALLOC=true
 ENV PATH=${PATH}:/opt/busybox:${CELEBORN_HOME}/sbin:${CELEBORN_HOME}/bin
 
-RUN set -ex && \
-    apt-get update && \
-    apt-get install -y bash tini busybox bind9-utils telnet net-tools procps krb5-user dnsutils libjemalloc-dev && \
-    ln -snf /bin/bash /bin/sh && \
-    rm -rf /var/cache/apt/* && \
-    mkdir /opt/busybox && \
-    busybox --install /opt/busybox && \
-    groupadd --gid=${celeborn_gid} celeborn && \
+RUN groupadd --gid=${celeborn_gid} celeborn && \
     useradd  --uid=${celeborn_uid} --gid=${celeborn_gid} celeborn -d /home/celeborn -m && \
     mkdir -p ${CELEBORN_HOME}
 

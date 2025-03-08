@@ -19,17 +19,17 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# 集群新部署时的image版本
-releaseVersion: 0.4.0.10
+# we provide a default celeborn image, you can also replace to your image
+releaseVersion: 0.4.0.9
 
 image:
   repository: docker-reg.devops.xiaohongshu.com/data/celeborn
   master:
     pullPolicy: Always
-    tag: 0.4.0.10
+    tag: 0.4.0.9
   worker:
     pullPolicy: Always
-    tag: 0.4.0.10
+    tag: 0.4.0.9
 
 
 imagePullSecrets:
@@ -38,7 +38,7 @@ imagePullSecrets:
 # master replicas should not less than 3
 masterReplicas: 3
 # worker replicas set on demand, should less than node number
-workerReplicas: 5
+workerReplicas: 20
 
 partition:
   master: 0
@@ -142,7 +142,7 @@ podMonitor:
 
 service:
   type: ClusterIP
-  port: 9097
+  port: 9197
 
 portMapping:
   # 默认组 9097 的端口配置

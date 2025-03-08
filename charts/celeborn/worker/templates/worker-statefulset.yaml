@@ -1,0 +1,169 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels:
+    app.kubernetes.io/role: worker
+    {{- include "celeborn.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "celeborn.workerSelectorLabels" . | nindent 6 }}
+  serviceName: {{ .Release.Name }}-worker
+  replicas: {{ .Values.workerReplicas }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: {{ .Values.partition.worker | default 0 }}  # 初始值为总 Pod 数量
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: "/metrics/prometheus"
+        prometheus.io/port: "{{ (index .Values.portMapping (toString .Values.service.port)).metrics_worker }}"
+        prometheus.io/scrape: "true"
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "celeborn.workerSelectorLabels" . | nindent 8 }}
+        {{- toYaml .Values.podExtraLabels | nindent 8 }}
+        app.kubernetes.io/version: {{ .Values.releaseVersion | quote }}
+        app.kubernetes.io/tag: {{ .Values.image.worker.tag | quote }}
+        clusterName: {{ .Values.clusterName | quote }}
+        masterCluster: {{ .Values.clusterName | quote }}
+        version: {{ .Values.releaseVersion | quote }}
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: "kubernetes.io/hostname"
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/role: worker
+                  app.kubernetes.io/port: {{ toString .Values.service.port | quote }}
+      {{- with .Values.nodeSelector.worker }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations.worker }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.priorityClass.worker.name .Values.priorityClass.worker.create }}
+      priorityClassName: {{ .Values.priorityClass.worker.name | default (printf "%s-worker-priority" (.Release.Name)) }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      hostNetwork: {{ .Values.network.worker.hostNetwork }}
+      dnsPolicy: {{ .Values.network.worker.dnsPolicy }}
+      restartPolicy: Always
+      initContainers:
+        - name: chown-{{ $.Release.Name }}-worker-volume
+          image: "{{ .Values.image.repository }}:{{ .Values.image.worker.tag }}"
+          imagePullPolicy: {{ "Always" }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - chown
+            - {{ .Values.securityContext.runAsUser | default 10006 }}:{{ .Values.securityContext.runAsGroup | default 10006 }}
+            - /data/celeborn
+          volumeMounts:
+            - name: celeborn-worker
+              mountPath: /data/celeborn
+      containers:
+      - name: {{ .Chart.Name }}
+        {{- $selectedPorts := index .Values.portMapping (toString .Values.service.port) }}  {{/* 获取端口映射 */}}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.worker.tag }}"
+        imagePullPolicy: {{ .Values.image.worker.pullPolicy | default "IfNotPresent" }}
+        command:
+          - "/usr/bin/tini"
+          - "--"
+          - "/bin/sh"
+          - '-c'
+          - |
+            # Healthcheck with retry logic
+            retry_count=0
+            max_retries=30
+            while [ $retry_count -lt $max_retries ]; do
+                if curl -sf --max-time 5 "http://{{ (split "," .Values.masterHosts)._0 }}:{{ $selectedPorts.metrics_master }}/masterGroupInfo" | grep -q "group id:"; then
+                    break
+                fi
+                echo "[$(date +'%Y-%m-%d %H:%M:%S')][Attempt ${retry_count}/${max_retries}] Master Group not ready..."
+                retry_count=$((retry_count+1))
+                sleep 10
+            done
+            if [ $retry_count -eq $max_retries ]; then
+                echo "Master Group check timeout after $((max_retries*10)) seconds"
+                exit 1
+            fi
+            
+            # Start worker
+            echo "=============== Starting Celeborn Worker ==============="
+            exec /opt/celeborn/sbin/start-worker.sh
+        resources:
+          {{- toYaml .Values.resources.worker | nindent 12 }}
+#        lifecycle:
+#          preStop:
+#            exec:
+#              command:
+#                - "/usr/bin/tini"
+#                - "--"
+#                - "/bin/sh"
+#                - "-c"
+#                - |
+#                  # 获取ExitKind（带超时和默认值）
+#                  EXIT_CODE=$(curl -sS --max-time 5 http://localhost:{{ $selectedPorts.metrics_worker }}/getExitKind | sed -n 2p | tr -d '[:space:]' || echo "1")
+#                  # 仅在 DECOMMISSION (2) 时等待进程退出
+#                  if [ "$EXIT_CODE" = "2" ]; then
+#                    echo "Waiting for CelebornWorker process to exit..."
+#                    while pgrep -f "org.apache.celeborn.service.deploy.worker.Worker" >/dev/null; do
+#                      sleep 30
+#                    done
+#                    echo "CelebornWorker process has exited."
+#                  else
+#                    # 停止 Celeborn 进程
+#                    exec /opt/celeborn/sbin/stop-worker.sh
+#                  fi
+        volumeMounts:
+          - mountPath: /opt/celeborn/conf
+            name: {{ include "celeborn.fullname" . }}-volume
+            readOnly: true
+          - name: celeborn-worker
+            mountPath: /data/celeborn
+        env:
+          {{- range $key, $val := .Values.environments }}
+          - name: {{ $key }}
+            value: {{ $val | quote }}
+          {{- end}}
+          # 直接引用 Pod 的 metadata.name 字段
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+      terminationGracePeriodSeconds: 86400
+      volumes:
+        - configMap:
+            name: {{ .Release.Name }}-conf
+          name: {{ include "celeborn.fullname" . }}-volume
+  volumeClaimTemplates:
+  - metadata:
+      name: celeborn-worker
+    spec:
+      {{- toYaml .Values.pvc.worker | nindent 6 }}

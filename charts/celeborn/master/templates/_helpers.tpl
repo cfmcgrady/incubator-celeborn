@@ -53,9 +53,6 @@ Common labels
 {{- define "celeborn.labels" -}}
 helm.sh/chart: {{ include "celeborn.chart" . }}
 {{ include "celeborn.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
@@ -63,7 +60,25 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 Selector labels
 */}}
 {{- define "celeborn.selectorLabels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/port: {{ toString .Values.service.port | quote }}
+{{- end }}
+
+{{/*
+Master selector labels
+*/}}
+{{- define "celeborn.masterSelectorLabels" -}}
+{{ include "celeborn.selectorLabels" . }}
+app.kubernetes.io/role: master
+{{- end }}
+
+{{/*
+Worker selector labels
+*/}}
+{{- define "celeborn.workerSelectorLabels" -}}
+{{ include "celeborn.selectorLabels" . }}
+app.kubernetes.io/role: worker
 {{- end }}
 
 {{/*
@@ -76,3 +91,4 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+

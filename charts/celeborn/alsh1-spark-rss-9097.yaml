@@ -19,17 +19,19 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# 集群新部署时的image版本
-releaseVersion: 0.4.0.10
+# we provide a default celeborn image, you can also replace to your image
+releaseVersion: 0.4.0.10_36367431
 
 image:
   repository: docker-reg.devops.xiaohongshu.com/data/celeborn
   master:
     pullPolicy: Always
-    tag: 0.4.0.10
+    tag: 0.4.0.10_36367431
   worker:
     pullPolicy: Always
-    tag: 0.4.0.10
+    tag: 0.4.0.10_36367431
+
+clusterName: alsh1-spark-rss
 
 
 imagePullSecrets:
@@ -38,7 +40,7 @@ imagePullSecrets:
 # master replicas should not less than 3
 masterReplicas: 3
 # worker replicas set on demand, should less than node number
-workerReplicas: 5
+workerReplicas: 100
 
 partition:
   master: 0
@@ -64,14 +66,14 @@ pvc:
     storageClassName: "csi-local-host-path"
     resources:
       requests:
-        storage: 1.8Ti
+        storage: 300Gi
 
 securityContext:
   runAsUser: 10006
   runAsGroup: 10006
   fsGroup: 10006
 
-masterHosts: 10.144.10.165,10.144.10.178,10.144.10.179
+masterHosts: 10.97.9.184,10.97.9.185,10.97.9.186
 
 
 # Current Celeborn support followings volume type:
@@ -84,11 +86,11 @@ masterHosts: 10.144.10.165,10.144.10.178,10.144.10.179
 volumes:
   master:
     - mountPath: /data/celeborn
-      hostPath: /data
+      hostPath: /celeborn
       type: hostPath
   worker:
     - mountPath: /data/celeborn
-      hostPath: /data
+      hostPath: /celeborn
       type: hostPath
 
 
@@ -120,6 +122,7 @@ podExtraLabels:
   sd.xhs.com/service: xhs.data.emr-k8s.rss-k8s
   xhs.com/prdline: data
   sd.xhs.data.com/service: redspark
+
 
 environments:
   CELEBORN_MASTER_MEMORY: 48g
@@ -194,10 +197,10 @@ resources:
   worker:
     limits:
       cpu: 8
-      memory: 64Gi
+      memory: 63Gi
     requests:
-      cpu: 8
-      memory: 64Gi
+      cpu: 7
+      memory: 59Gi
 
 # priorityClass used for Celeborn pods
 priorityClass:
@@ -220,13 +223,13 @@ tolerations:
   master:
     - key: "dedicate"
       operator: "Equal"
-      value: "spark-master"
+      value: "celeborn-master"
       effect: "NoSchedule"
   worker: []
 
 nodeSelector:
   master:
-    dedicate: spark-master
+    dedicate: celeborn-master
   worker:
-    dedicate: task
+    dedicate: celeborn-worker
 
