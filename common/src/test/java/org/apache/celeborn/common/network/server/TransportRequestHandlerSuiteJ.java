@@ -48,7 +48,7 @@ public class TransportRequestHandlerSuiteJ {
   public void setUp() {
     MockitoAnnotations.openMocks(this);
     when(msgHandler.checkRegistered()).thenReturn(true);
-    requestHandler = new TransportRequestHandler(channel, reverseClient, msgHandler);
+    requestHandler = new TransportRequestHandler(channel, reverseClient, msgHandler, null);
   }
 
   @Test

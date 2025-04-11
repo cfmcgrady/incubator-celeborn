@@ -23,17 +23,14 @@ import java.util.{function, List => JList}
 import java.util.concurrent.{Callable, ConcurrentHashMap, LinkedBlockingQueue, ScheduledFuture, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
-
 import scala.collection.JavaConverters._
 import scala.collection.generic.CanBuildFrom
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.Duration
 import scala.util.Random
-
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.cache.{Cache, CacheBuilder}
-
 import org.apache.celeborn.client.LifecycleManager.{ShuffleAllocatedWorkers, ShuffleFailedWorkers}
 import org.apache.celeborn.client.listener.WorkerStatusListener
 import org.apache.celeborn.common.CelebornConf
@@ -44,7 +41,7 @@ import org.apache.celeborn.common.meta.{ShufflePartitionLocationInfo, WorkerInfo
 import org.apache.celeborn.common.protocol._
 import org.apache.celeborn.common.protocol.RpcNameConstants.WORKER_EP
 import org.apache.celeborn.common.protocol.message.ControlMessages._
-import org.apache.celeborn.common.protocol.message.StatusCode
+import org.apache.celeborn.common.protocol.message.{FailureType, StatusCode}
 import org.apache.celeborn.common.rpc._
 import org.apache.celeborn.common.rpc.netty.{LocalNettyRpcCallContext, RemoteNettyRpcCallContext}
 import org.apache.celeborn.common.util.{JavaUtils, PbSerDeUtils, ThreadUtils, Utils}
@@ -81,6 +78,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   private val shufflePartitionType = JavaUtils.newConcurrentHashMap[Int, PartitionType]()
   private val rangeReadFilter = conf.shuffleRangeReadFilterEnabled
   private val unregisterShuffleTime = JavaUtils.newConcurrentHashMap[Int, Long]()
+  private val reportedFailure = JavaUtils.newConcurrentHashMap[FailureType, Boolean]()
 
   val registeredShuffle = ConcurrentHashMap.newKeySet[Int]()
   // maintain each shuffle's map relation of WorkerInfo and partition location
@@ -353,8 +351,14 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     case pb: PbReportShuffleFetchFailure =>
       val appShuffleId = pb.getAppShuffleId
       val shuffleId = pb.getShuffleId
-      logDebug(s"Received ReportShuffleFetchFailure request, appShuffleId $appShuffleId shuffleId $shuffleId")
-      handleReportShuffleFetchFailure(context, appShuffleId, shuffleId)
+      val failureType = FailureType.fromValue(pb.getFailureType)
+      logDebug(s"Received ReportShuffleFetchFailure request, appShuffleId $appShuffleId shuffleId $shuffleId failureType=${failureType.name()}")
+      handleReportShuffleFetchFailure(context, appShuffleId, shuffleId, failureType)
+
+    case pb: PbReportFailure =>
+      val failureType = FailureType.fromValue(pb.getFailureType)
+      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
+      handleReportFailure(context, failureType)
   }
 
   def setupEndpoints(
@@ -810,7 +814,8 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   private def handleReportShuffleFetchFailure(
       context: RpcCallContext,
       appShuffleId: Int,
-      shuffleId: Int): Unit = {
+      shuffleId: Int,
+      failureType: FailureType): Unit = {
 
     val shuffleIds = shuffleIdMapping.get(appShuffleId)
     if (shuffleIds == null) {
@@ -824,6 +829,9 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
           appShuffleTrackerCallback match {
             case Some(callback) =>
               try {
+                if (failureType != null) {
+                  reportFailureToMaster(failureType)
+                }
                 callback.accept(appShuffleId)
               } catch {
                 case t: Throwable =>
@@ -847,6 +855,25 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     val pbReportShuffleFetchFailureResponse =
       PbReportShuffleFetchFailureResponse.newBuilder().setSuccess(ret).build()
     context.reply(pbReportShuffleFetchFailureResponse)
+  }
+
+  private def reportFailureToMaster(failureType: FailureType): Boolean = {
+    if (!reportedFailure.containsKey(failureType)) {
+      reportedFailure.computeIfAbsent(failureType, new util.function.Function[FailureType, Boolean]() {
+        override def apply(ft: FailureType): Boolean = {
+          masterClient.send[PbReportFailureResponse](
+            PbReportFailure.newBuilder().setAppId(appUniqueId).setFailureType(failureType.getValue).build(),
+            classOf[PbReportFailureResponse]
+          )
+          true
+        }
+      })
+    }
+    reportedFailure.get(failureType)
+  }
+
+  private def handleReportFailure(context: RpcCallContext, failureType: FailureType): Unit = {
+    context.reply(PbReportFailureResponse.newBuilder().setSuccess(reportFailureToMaster(failureType)).build())
   }
 
   private def handleStageEnd(shuffleId: Int): Unit = {

@@ -23,6 +23,7 @@ import java.util.Map;
 import org.apache.celeborn.common.identity.UserIdentifier;
 import org.apache.celeborn.common.meta.DiskInfo;
 import org.apache.celeborn.common.meta.WorkerInfo;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.quota.ResourceConsumption;
 
 public interface IMetadataHandler {
@@ -76,4 +77,6 @@ public interface IMetadataHandler {
   void handleReportWorkerUnavailable(List<WorkerInfo> failedNodes, String requestId);
 
   void handleUpdatePartitionSize();
+
+  void handleReportFailure(FailureType failureType, String appId);
 }

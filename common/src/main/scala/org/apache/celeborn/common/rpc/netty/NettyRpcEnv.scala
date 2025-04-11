@@ -61,7 +61,7 @@ class NettyRpcEnv(
   private var worker: RpcEndpoint = null
 
   private val transportContext =
-    new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this))
+    new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this), config.source)
 
   val clientFactory = transportContext.createClientFactory()
 

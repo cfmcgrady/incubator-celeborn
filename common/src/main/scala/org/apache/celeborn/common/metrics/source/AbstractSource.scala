@@ -128,6 +128,10 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
   protected val namedCounters: ConcurrentHashMap[String, NamedCounter] =
     JavaUtils.newConcurrentHashMap[String, NamedCounter]()
 
+  def addFailedRpcCount(delta: Long): Unit = {}
+
+  def addTotalRpcCount(delta: Long): Unit = {}
+
   def addCounter(name: String): Unit = addCounter(name, Map.empty[String, String])
 
   def addCounter(name: String, labels: Map[String, String]): Unit = {

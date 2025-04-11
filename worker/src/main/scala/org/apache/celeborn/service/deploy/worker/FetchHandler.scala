@@ -291,6 +291,8 @@ class FetchHandler(
     } catch {
       case e: IOException =>
         workerSource.incCounter(WorkerSource.OPEN_STREAM_FAIL_COUNT)
+        workerSource.addFailedRpcCount(1)
+        workerSource.addTotalRpcCount(1)
         handleRpcIOException(client, rpcRequestId, shuffleKey, fileName, e, callback)
     } finally {
       workerSource.stopTimer(WorkerSource.OPEN_STREAM_TIME, shuffleKey)
@@ -306,6 +308,7 @@ class FetchHandler(
       offsets: util.List[java.lang.Long] = null,
       filepath: String = ""): Unit = {
     if (isLegacy) {
+      workerSource.addTotalRpcCount(1)
       client.getChannel.writeAndFlush(new RpcResponse(
         requestId,
         new NioManagedBuffer(new StreamHandle(streamId, numChunks).toByteBuffer)))
@@ -319,6 +322,7 @@ class FetchHandler(
         pbStreamHandlerBuilder.setFullPath(filepath)
       }
       val pbStreamHandler = pbStreamHandlerBuilder.build()
+      workerSource.addTotalRpcCount(1)
       client.getChannel.writeAndFlush(new RpcResponse(
         requestId,
         new NioManagedBuffer(new TransportMessage(
@@ -386,6 +390,8 @@ class FetchHandler(
           s"${Utils.bytesToString(threshold)}."
         logError(message)
         workerSource.incCounter(WorkerSource.FETCH_CHUNK_FAIL_COUNT)
+        workerSource.addFailedRpcCount(1)
+        workerSource.addTotalRpcCount(1)
         client.getChannel.writeAndFlush(new ChunkFetchFailure(streamChunkSlice, message))
         return
       }
@@ -402,6 +408,7 @@ class FetchHandler(
         streamChunkSlice.offset,
         streamChunkSlice.len)
       chunkStreamManager.chunkBeingSent(streamChunkSlice.streamId)
+      workerSource.addTotalRpcCount(1)
       client.getChannel.writeAndFlush(new ChunkFetchSuccess(streamChunkSlice, buf))
         .addListener(new GenericFutureListener[Future[_ >: Void]] {
           override def operationComplete(future: Future[_ >: Void]): Unit = {
@@ -430,6 +437,8 @@ class FetchHandler(
             NettyUtils.getRemoteAddress(client.getChannel),
           e)
         workerSource.incCounter(WorkerSource.FETCH_CHUNK_FAIL_COUNT)
+        workerSource.addFailedRpcCount(1)
+        workerSource.addTotalRpcCount(1)
         client.getChannel.writeAndFlush(new ChunkFetchFailure(
           streamChunkSlice,
           Throwables.getStackTraceAsString(e)))

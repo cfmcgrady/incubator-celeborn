@@ -832,12 +832,15 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
       shuffleKey: String)
     extends RpcResponseCallback {
     override def onSuccess(response: ByteBuffer): Unit = {
+      workerSource.addTotalRpcCount(1)
       client.getChannel.writeAndFlush(new RpcResponse(
         requestId,
         new NioManagedBuffer(response)))
     }
 
     override def onFailure(e: Throwable): Unit = {
+      workerSource.addFailedRpcCount(1)
+      workerSource.addTotalRpcCount(1)
       client.getChannel.writeAndFlush(new RpcFailure(requestId, e.getMessage))
     }
   }

@@ -118,7 +118,7 @@ public class MasterStateMachineSuiteJ extends RatisBaseSuiteJ {
   @Test
   public void testObjSerde() throws IOException, InterruptedException {
     CelebornConf conf = new CelebornConf();
-    HAMasterMetaManager masterStatusSystem = new HAMasterMetaManager(null, conf);
+    HAMasterMetaManager masterStatusSystem = new HAMasterMetaManager(null, conf, null);
     File tmpFile = File.createTempFile("tef", "test" + System.currentTimeMillis());
 
     Map<String, DiskInfo> disks1 = new HashMap<>();
@@ -285,9 +285,9 @@ public class MasterStateMachineSuiteJ extends RatisBaseSuiteJ {
     conf3.set(CelebornConf.HA_MASTER_RATIS_LOG_SEGMENT_SIZE_MAX().key(), "13490");
 
     RpcEnv mockRpcEnv = Mockito.mock(RpcEnv.class);
-    HAMasterMetaManager masterStatusSystem1 = new HAMasterMetaManager(mockRpcEnv, conf1);
-    HAMasterMetaManager masterStatusSystem2 = new HAMasterMetaManager(mockRpcEnv, conf2);
-    HAMasterMetaManager masterStatusSystem3 = new HAMasterMetaManager(mockRpcEnv, conf3);
+    HAMasterMetaManager masterStatusSystem1 = new HAMasterMetaManager(mockRpcEnv, conf1, null);
+    HAMasterMetaManager masterStatusSystem2 = new HAMasterMetaManager(mockRpcEnv, conf2, null);
+    HAMasterMetaManager masterStatusSystem3 = new HAMasterMetaManager(mockRpcEnv, conf3, null);
     MetaHandler handler1 = new MetaHandler(masterStatusSystem1);
     MetaHandler handler2 = new MetaHandler(masterStatusSystem2);
     MetaHandler handler3 = new MetaHandler(masterStatusSystem3);

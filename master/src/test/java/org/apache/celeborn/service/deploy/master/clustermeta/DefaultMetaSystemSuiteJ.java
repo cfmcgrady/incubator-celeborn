@@ -81,7 +81,7 @@ public class DefaultMetaSystemSuiteJ {
   @Before
   public void setUp() {
     when(mockRpcEnv.setupEndpointRef(any(), any())).thenReturn(dummyRef);
-    statusSystem = new SingleMasterMetaManager(mockRpcEnv, conf);
+    statusSystem = new SingleMasterMetaManager(mockRpcEnv, conf, null);
 
     disks1.clear();
     disks1.put("disk1", new DiskInfo("disk1", 64 * 1024 * 1024 * 1024L, 100, 100, 0));

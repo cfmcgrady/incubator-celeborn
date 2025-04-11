@@ -93,6 +93,10 @@ public class TransportContext {
     this(conf, msgHandler, closeIdleConnections, null, false, null);
   }
 
+  public TransportContext(TransportConf conf, BaseMessageHandler msgHandler, AbstractSource source) {
+    this(conf, msgHandler, false, false, source);
+  }
+
   public TransportContext(TransportConf conf, BaseMessageHandler msgHandler) {
     this(conf, msgHandler, false, false, null);
   }
@@ -169,7 +173,7 @@ public class TransportContext {
     TransportResponseHandler responseHandler = new TransportResponseHandler(conf, channel);
     TransportClient client = new TransportClient(channel, responseHandler);
     TransportRequestHandler requestHandler =
-        new TransportRequestHandler(channel, client, msgHandler);
+        new TransportRequestHandler(channel, client, msgHandler, source);
     return new TransportChannelHandler(
         client,
         responseHandler,

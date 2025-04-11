@@ -32,7 +32,7 @@ public class RatisBaseSuiteJ {
   @Before
   public void init() throws Exception {
     CelebornConf conf = new CelebornConf();
-    HAMasterMetaManager metaSystem = new HAMasterMetaManager(null, conf);
+    HAMasterMetaManager metaSystem = new HAMasterMetaManager(null, conf, null);
     MetaHandler handler = new MetaHandler(metaSystem);
     File tmpDir1 = File.createTempFile("celeborn-ratis-tmp", "for-test-only");
     tmpDir1.delete();

@@ -25,11 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.celeborn.common.protocol.message.FailureType;
 import scala.Tuple2;
 import scala.reflect.ClassTag$;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Lists;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
@@ -390,6 +390,7 @@ public class ShuffleClientImpl extends ShuffleClient {
             pushState.exception.compareAndSet(
                 null,
                 new CelebornIOException(
+                    FailureType.REVIVE_FAILED,
                     errorMsg,
                     new CelebornIOException(
                         cause
@@ -426,6 +427,7 @@ public class ShuffleClientImpl extends ShuffleClient {
         pushState.exception.compareAndSet(
             null,
             new CelebornIOException(
+                FailureType.REVIVE_FAILED,
                 errorMsg,
                 new CelebornIOException(
                     cause
@@ -557,11 +559,12 @@ public class ShuffleClientImpl extends ShuffleClient {
   }
 
   @Override
-  public boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId) {
+  public boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId, FailureType failureType) {
     PbReportShuffleFetchFailure pbReportShuffleFetchFailure =
         PbReportShuffleFetchFailure.newBuilder()
             .setAppShuffleId(appShuffleId)
             .setShuffleId(shuffleId)
+            .setFailureType(failureType.getValue())
             .build();
     PbReportShuffleFetchFailureResponse pbReportShuffleFetchFailureResponse =
         lifecycleManagerRef.askSync(
@@ -569,6 +572,18 @@ public class ShuffleClientImpl extends ShuffleClient {
             conf.clientRpcRegisterShuffleRpcAskTimeout(),
             ClassTag$.MODULE$.apply(PbReportShuffleFetchFailureResponse.class));
     return pbReportShuffleFetchFailureResponse.getSuccess();
+  }
+
+  public void reportFailure(FailureType failureType) {
+    PbReportFailure pbReportFailure = PbReportFailure.newBuilder()
+            .setFailureType(failureType.getValue())
+            .setAppId(appUniqueId)
+            .build();
+    PbReportFailureResponse pbReportFailureResponse = lifecycleManagerRef.askSync(
+            pbReportFailure,
+            conf.rpcAskTimeout(),
+            ClassTag$.MODULE$.apply(PbReportFailureResponse.class)
+    );
   }
 
   private ConcurrentHashMap<Integer, PartitionLocation> registerShuffleInternal(
@@ -636,6 +651,7 @@ public class ShuffleClientImpl extends ShuffleClient {
 
     if (reachLimit) {
       throw new CelebornIOException(
+          FailureType.PUSH_LIMIT_FAILED,
           String.format(
               "Waiting timeout for task %s while limiting max in-flight requests to %s",
               mapKey, hostAndPushPort),
@@ -648,6 +664,7 @@ public class ShuffleClientImpl extends ShuffleClient {
 
     if (reachLimit) {
       throw new CelebornIOException(
+          FailureType.PUSH_LIMIT_FAILED,
           String.format(
               "Waiting timeout for task %s while limiting zero in-flight requests", mapKey),
           pushState.exception.get());
@@ -848,7 +865,8 @@ public class ShuffleClientImpl extends ShuffleClient {
         getPartitionLocation(shuffleId, numMappers, numPartitions);
 
     if (map == null) {
-      throw new CelebornIOException("Register shuffle failed for shuffle " + shuffleId + ".");
+      throw new CelebornIOException(FailureType.REGISTER_SHUFFLE_FAILED,
+              "Register shuffle failed for shuffle " + shuffleId + ".", null);
     }
 
     // get location
@@ -863,8 +881,8 @@ public class ShuffleClientImpl extends ShuffleClient {
           -1,
           null,
           StatusCode.PUSH_DATA_FAIL_NON_CRITICAL_CAUSE)) {
-        throw new CelebornIOException(
-            String.format("Revive for shuffle %s partition %d failed.", shuffleId, partitionId));
+        throw new CelebornIOException(FailureType.REVIVE_FAILED,
+            String.format("Revive for shuffle %s partition %d failed.", shuffleId, partitionId), null);
       }
     }
 
@@ -884,9 +902,9 @@ public class ShuffleClientImpl extends ShuffleClient {
 
     final PartitionLocation loc = map.get(partitionId);
     if (loc == null) {
-      throw new CelebornIOException(
+      throw new CelebornIOException(FailureType.GET_PARTITION_FAILED,
           String.format(
-              "Partition location for shuffle %s partition %d is NULL!", shuffleId, partitionId));
+              "Partition location for shuffle %s partition %d is NULL!", shuffleId, partitionId), null);
     }
 
     PushState pushState = getPushState(mapKey);
@@ -949,7 +967,7 @@ public class ShuffleClientImpl extends ShuffleClient {
                   String.format(
                       "Push data to %s failed for shuffle %d map %d attempt %d partition %d batch %d.",
                       loc, shuffleId, mapId, attemptId, partitionId, nextBatchId);
-              pushState.exception.compareAndSet(null, new CelebornIOException(errorMsg, e));
+              pushState.exception.compareAndSet(null, new CelebornIOException(FailureType.PUSH_FAILED, errorMsg, e));
             }
           };
 
@@ -1339,7 +1357,7 @@ public class ShuffleClientImpl extends ShuffleClient {
                     groupedBatchId,
                     Arrays.toString(batchIds),
                     remainReviveTimes);
-            pushState.exception.compareAndSet(null, new CelebornIOException(errorMsg, e));
+            pushState.exception.compareAndSet(null, new CelebornIOException(FailureType.PUSH_FAILED, errorMsg, e));
             if (logger.isDebugEnabled()) {
               for (int i = 0; i < numBatches; i++) {
                 logger.debug(
@@ -1619,7 +1637,8 @@ public class ShuffleClientImpl extends ShuffleClient {
                   pushState.getFailedBatches()),
               ClassTag$.MODULE$.apply(MapperEndResponse.class));
       if (response.status() != StatusCode.SUCCESS) {
-        throw new CelebornIOException("MapperEnd failed! StatusCode: " + response.status());
+        throw new CelebornIOException(FailureType.MAPPER_END_FAILED,
+                "MapperEnd failed! StatusCode: " + response.status(), null);
       }
     } finally {
       pushStates.remove(mapKey);
@@ -1631,7 +1650,7 @@ public class ShuffleClientImpl extends ShuffleClient {
     final String mapKey = Utils.makeMapKey(shuffleId, mapId, attemptId);
     PushState pushState = pushStates.remove(mapKey);
     if (pushState != null) {
-      pushState.exception.compareAndSet(null, new CelebornIOException("Cleaned Up"));
+      pushState.exception.compareAndSet(null, new CelebornIOException(FailureType.CLEANUP, "Cleaned Up", null));
       pushState.cleanup();
     }
   }
@@ -1716,8 +1735,8 @@ public class ShuffleClientImpl extends ShuffleClient {
     Tuple2<ReduceFileGroups, String> fileGroupTuple =
         reduceFileGroupsMap.computeIfAbsent(shuffleId, (id) -> loadFileGroupInternal(shuffleId));
     if (fileGroupTuple._1 == null) {
-      throw new CelebornIOException(
-          loadFileGroupException(shuffleId, partitionId, (fileGroupTuple._2)));
+      throw new CelebornIOException(FailureType.GET_PARTITION_FAILED,
+          loadFileGroupException(shuffleId, partitionId, (fileGroupTuple._2)), null);
     } else {
       return fileGroupTuple._1;
     }

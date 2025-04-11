@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -260,5 +261,7 @@ public abstract class ShuffleClient {
    * cleanup for spark app. It must be a sync call and make sure the cleanup is done, otherwise,
    * incorrect shuffle data can be fetched in re-run tasks
    */
-  public abstract boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId);
+  public abstract boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId, FailureType failureType);
+
+  public abstract void reportFailure(FailureType failureType);
 }

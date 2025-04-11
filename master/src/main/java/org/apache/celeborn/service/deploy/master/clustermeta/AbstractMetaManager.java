@@ -22,17 +22,16 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
+import org.apache.celeborn.common.metrics.source.AbstractSource;
+import org.apache.celeborn.common.protocol.message.FailureType;
+import org.apache.celeborn.service.deploy.master.MasterSource;
 import scala.Option;
 
 import org.slf4j.Logger;
@@ -70,6 +69,7 @@ public abstract class AbstractMetaManager implements IMetadataHandler {
   protected RpcEnv rpcEnv;
   protected CelebornConf conf;
   protected CelebornRackResolver rackResolver;
+  protected AbstractSource source;
 
   public long initialEstimatedPartitionSize;
   public long estimatedPartitionSize;
@@ -372,5 +372,12 @@ public abstract class AbstractMetaManager implements IMetadataHandler {
             worker ->
                 !excludedWorkers.contains(worker) && !manuallyExcludedWorkers.contains(worker))
         .forEach(workerInfo -> workerInfo.updateDiskMaxSlots(estimatedPartitionSize));
+  }
+  
+  public void updateFailureCount(FailureType failureType, String appId) {
+    LOG.debug("appId " + appId + " failure " + failureType.getDisplay());
+    if (null != source) {
+      ((MasterSource)source).incFailureAppCount(failureType);
+    }
   }
 }

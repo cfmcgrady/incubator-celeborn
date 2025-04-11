@@ -18,11 +18,12 @@
 package org.apache.celeborn.common.rpc
 
 import java.io.File
-
 import scala.concurrent.Future
-
 import org.apache.celeborn.common.CelebornConf
+import org.apache.celeborn.common.metrics.source.AbstractSource
 import org.apache.celeborn.common.rpc.netty.NettyRpcEnvFactory
+
+import scala.annotation.tailrec
 
 /**
  * A RpcEnv implementation must have a [[RpcEnvFactory]] implementation with an empty constructor
@@ -37,6 +38,16 @@ object RpcEnv {
       conf: CelebornConf): RpcEnv = {
     create(name, host, host, port, conf, 0)
   }
+  
+  def create(
+              name: String,
+              bindAddress: String,
+              advertiseAddress: String,
+              port: Int,
+              conf: CelebornConf,
+              numUsableCores: Int): RpcEnv = {
+    create(name, bindAddress, advertiseAddress, port, conf, numUsableCores, null)
+  }
 
   def create(
       name: String,
@@ -44,8 +55,9 @@ object RpcEnv {
       advertiseAddress: String,
       port: Int,
       conf: CelebornConf,
-      numUsableCores: Int): RpcEnv = {
-    val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, numUsableCores)
+      numUsableCores: Int,
+      source: AbstractSource): RpcEnv = {
+    val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, numUsableCores, source)
     new NettyRpcEnvFactory().create(config)
   }
 }
@@ -178,4 +190,5 @@ private[celeborn] case class RpcEnvConfig(
     bindAddress: String,
     advertiseAddress: String,
     port: Int,
-    numUsableCores: Int)
+    numUsableCores: Int,
+    source: AbstractSource)

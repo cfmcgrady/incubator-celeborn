@@ -20,6 +20,7 @@ package org.apache.celeborn.service.deploy.master
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.metrics.MetricsSystem
 import org.apache.celeborn.common.metrics.source.AbstractSource
+import org.apache.celeborn.common.protocol.message.FailureType
 
 class MasterSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSystem.ROLE_MASTER) {
   override val sourceName = "master"
@@ -27,8 +28,36 @@ class MasterSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   import MasterSource._
   // add timers
   addTimer(OFFER_SLOTS_TIME)
+  // add counters
+  addCounter(RPC_COUNT)
+  addCounter(RPC_FAILED_COUNT)
+
+  private def addFailureTypeCounters(): Unit = {
+    for (failureType <- FailureType.values) {
+      if (failureType != FailureType.UNKNOWN) {
+        addCounter(APP_FAILED_COUNT, Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
+      }
+    }
+  }
+
+  addFailureTypeCounters()
+
   // start cleaner
   startCleaner()
+
+  override def addFailedRpcCount(delta: Long): Unit = {
+    incCounter(RPC_FAILED_COUNT, delta)
+  }
+
+  override def addTotalRpcCount(delta: Long): Unit = {
+    incCounter(RPC_COUNT, delta)
+  }
+  
+  def incFailureAppCount(failureType: FailureType): Unit = {
+    if (failureType != FailureType.UNKNOWN) {
+      incCounter(APP_FAILED_COUNT, 1, Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
+    }
+  }
 }
 
 object MasterSource {
@@ -51,4 +80,10 @@ object MasterSource {
   val ACTIVE_SHUFFLE_FILE_COUNT = "ActiveShuffleFileCount"
 
   val OFFER_SLOTS_TIME = "OfferSlotsTime"
+
+  val RPC_COUNT = "RpcCount"
+
+  val RPC_FAILED_COUNT = "RpcFailedCount"
+  
+  val APP_FAILED_COUNT = "AppFailedCount"
 }

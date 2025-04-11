@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 
 import scala.Tuple2;
 import scala.concurrent.Future;
+import scala.concurrent.duration.FiniteDuration;
 import scala.reflect.ClassTag$;
 
 import com.google.common.util.concurrent.Uninterruptibles;
@@ -112,6 +113,26 @@ public class MasterClient {
     LOG.debug("Send one-way message {}.", message);
   }
 
+  public void send(GeneratedMessageV3 message) throws Throwable {
+    send(message, OneWayMessageResponse$.class);
+  }
+
+  public <T> void send(GeneratedMessageV3 message, Class<T> clz) throws Throwable {
+    // Send a one-way message. Because we need to know whether the leader between Masters has
+    // switched, we must adopt a synchronous method, but for a one-way message, we don't care
+    // whether it can be sent successfully, so we adopt an asynchronous method. Therefore, we
+    // choose to use one Thread pool to use synchronization.
+    oneWayMessageSender.submit(
+            () -> {
+              try {
+                sendMessageInner(message, clz);
+              } catch (Throwable e) {
+                LOG.warn("Exception occurs while send one-way message.", e);
+              }
+            });
+    LOG.debug("Send one-way message {}.", message);
+  }
+
   public <T> T askSync(Message message, Class<T> clz) throws Throwable {
     return sendMessageInner(message, clz);
   }
@@ -121,7 +142,7 @@ public class MasterClient {
   }
 
   public void close() {
-    ThreadUtils.shutdown(oneWayMessageSender);
+    ThreadUtils.shutdown(oneWayMessageSender, new FiniteDuration(5, TimeUnit.SECONDS));
   }
 
   @SuppressWarnings("UnstableApiUsage")

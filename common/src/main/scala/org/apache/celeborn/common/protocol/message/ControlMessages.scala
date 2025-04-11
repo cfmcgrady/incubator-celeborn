@@ -505,6 +505,12 @@ object ControlMessages extends Logging {
     case pb: PbReportShuffleFetchFailureResponse =>
       new TransportMessage(MessageType.REPORT_SHUFFLE_FETCH_FAILURE_RESPONSE, pb.toByteArray)
 
+    case pb: PbReportFailure =>
+      new TransportMessage(MessageType.REPORT_FAILURE, pb.toByteArray)
+
+    case pb: PbReportFailureResponse =>
+      new TransportMessage(MessageType.REPORT_FAILURE_RESPONSE, pb.toByteArray)
+
     case pb: PbPushMergedDataSplitPartitionInfo =>
       new TransportMessage(MessageType.PUSH_MERGED_DATA_SPLIT_PARTITION_INFO, pb.toByteArray)
 
@@ -1044,6 +1050,12 @@ object ControlMessages extends Logging {
         message.getParsedPayload()
 
       case REPORT_SHUFFLE_FETCH_FAILURE_RESPONSE_VALUE =>
+        message.getParsedPayload()
+
+      case REPORT_FAILURE_VALUE =>
+        message.getParsedPayload()
+
+      case REPORT_FAILURE_RESPONSE_VALUE =>
         message.getParsedPayload()
 
       case UNREGISTER_SHUFFLE_VALUE =>
