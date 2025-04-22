@@ -312,9 +312,9 @@ abstract class CommitHandler(
             case scala.util.Success(res) =>
               res.status match {
                 case StatusCode.SUCCESS | StatusCode.PARTIAL_SUCCESS | StatusCode.SHUFFLE_NOT_REGISTERED | StatusCode.REQUEST_FAILED | StatusCode.WORKER_EXCLUDED =>
-                  logDebug(s"Request commitFiles return ${res.status} for " +
-                    s"${Utils.makeShuffleKey(appUniqueId, shuffleId)}")
                   if (res.status != StatusCode.SUCCESS && res.status != StatusCode.WORKER_EXCLUDED) {
+                    logWarning(s"Request commitFiles return ${res.status} for " +
+                      s"${Utils.makeShuffleKey(appUniqueId, shuffleId)}")
                     commitFilesFailedWorkers.put(worker, (res.status, System.currentTimeMillis()))
                   }
                   processResponse(res, worker)
