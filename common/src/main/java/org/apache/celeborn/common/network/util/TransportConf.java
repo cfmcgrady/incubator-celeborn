@@ -54,6 +54,10 @@ public class TransportConf {
   public int connectionTimeoutMs() {
     return celebornConf.networkIoConnectionTimeoutMs(module);
   }
+  
+  public boolean workerCloseIdleConnections() {
+    return celebornConf.workerCloseIdleConnections(module);
+  }
 
   /** Number of concurrent connections between two nodes for fetching data. */
   public int numConnectionsPerPeer() {

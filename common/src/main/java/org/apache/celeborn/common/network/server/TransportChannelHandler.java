@@ -185,7 +185,8 @@ public class TransportChannelHandler extends ChannelInboundHandlerAdapter {
             // While CloseIdleConnections is enabled, we also close idle connection
             client.timeOut();
             ctx.close();
-          }
+            logger.warn("channel from " + NettyUtils.getRemoteAddress(ctx.channel()) + " to local " + transportContext.getConf().getModuleName() + " module closed");
+          } 
         }
       }
     }

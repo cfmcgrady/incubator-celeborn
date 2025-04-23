@@ -422,6 +422,11 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
     getTimeAsMs(key, s"${networkTimeout.duration.toMillis}ms").toInt
   }
 
+  def workerCloseIdleConnections(module: String): Boolean = {
+    val key = WORKER_CLOSE_IDLE_CONNECTIONS.key.replace("<module>", module)
+    getBoolean(key, WORKER_CLOSE_IDLE_CONNECTIONS.defaultValue.get)
+  }
+
   def networkIoNumConnectionsPerPeer(module: String): Int = {
     val key = NETWORK_IO_NUM_CONNECTIONS_PER_PEER.key.replace("<module>", module)
     getInt(key, NETWORK_IO_NUM_CONNECTIONS_PER_PEER.defaultValue.get)
@@ -683,7 +688,6 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def workerReplicateIoThreads: Option[Int] = get(WORKER_REPLICATE_IO_THREADS)
   def registerWorkerTimeout: Long = get(WORKER_REGISTER_TIMEOUT)
   def workerWorkingDir: String = get(WORKER_WORKING_DIR)
-  def workerCloseIdleConnections: Boolean = get(WORKER_CLOSE_IDLE_CONNECTIONS)
   def workerReplicateFastFailDuration: Long = get(WORKER_REPLICATE_FAST_FAIL_DURATION)
   def workerReplicateRandomConnectionEnabled: Boolean =
     get(WORKER_REPLICATE_RANDOM_CONNECTION_ENABLED)
@@ -2490,10 +2494,19 @@ object CelebornConf extends Logging {
       .createWithDefaultString("180s")
 
   val WORKER_CLOSE_IDLE_CONNECTIONS: ConfigEntry[Boolean] =
-    buildConf("celeborn.worker.closeIdleConnections")
+    buildConf("celeborn.worker.<module>.closeIdleConnections")
       .categories("worker")
-      .doc("Whether worker will close idle connections.")
-      .version("0.2.0")
+      .doc("Whether worker will close idle connections. " +
+        s"If setting <module> to `${TransportModuleConstants.PUSH_MODULE}`, " +
+        s"it works for worker receiving push data. " +
+        s"If setting <module> to `${TransportModuleConstants.RPC_MODULE}`, " +
+        s"it works for worker rpc server. " +
+        s"If setting <module> to `${TransportModuleConstants.DATA_MODULE}`, " +
+        s"it works for shuffle client push and fetch data. " +
+        s"If setting <module> to `${TransportModuleConstants.FETCH_MODULE}`, " +
+        s"it works for worker fetch server." +
+        s"If setting <module> to `${TransportModuleConstants.REPLICATE_MODULE}`, " +
+        s"it works for replicate server. ")
       .booleanConf
       .createWithDefault(false)
 

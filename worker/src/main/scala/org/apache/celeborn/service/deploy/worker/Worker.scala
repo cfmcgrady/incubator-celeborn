@@ -145,10 +145,11 @@ private[celeborn] class Worker(
 
   val pushDataHandler = new PushDataHandler(workerSource)
   private val pushServer = {
-    val closeIdleConnections = conf.workerCloseIdleConnections
+    
     val numThreads = conf.workerPushIoThreads.getOrElse(storageManager.totalFlusherThread)
     val transportConf =
       Utils.fromCelebornConf(conf, TransportModuleConstants.PUSH_MODULE, numThreads)
+    val closeIdleConnections = transportConf.workerCloseIdleConnections
     val pushServerLimiter = new ChannelsLimiter(TransportModuleConstants.PUSH_MODULE, conf)
     val transportContext: TransportContext =
       new TransportContext(
@@ -163,11 +164,11 @@ private[celeborn] class Worker(
 
   val replicateHandler = new PushDataHandler(workerSource)
   val (replicateServer, replicateClientFactory) = {
-    val closeIdleConnections = conf.workerCloseIdleConnections
     val numThreads =
       conf.workerReplicateIoThreads.getOrElse(storageManager.totalFlusherThread)
     val transportConf =
       Utils.fromCelebornConf(conf, TransportModuleConstants.REPLICATE_MODULE, numThreads)
+    val closeIdleConnections = transportConf.workerCloseIdleConnections
     val replicateLimiter = new ChannelsLimiter(TransportModuleConstants.REPLICATE_MODULE, conf)
     val transportContext: TransportContext =
       new TransportContext(
@@ -184,10 +185,10 @@ private[celeborn] class Worker(
 
   var fetchHandler: FetchHandler = _
   private val fetchServer = {
-    val closeIdleConnections = conf.workerCloseIdleConnections
     val numThreads = conf.workerFetchIoThreads.getOrElse(storageManager.totalFlusherThread)
     val transportConf =
       Utils.fromCelebornConf(conf, TransportModuleConstants.FETCH_MODULE, numThreads)
+    val closeIdleConnections = transportConf.workerCloseIdleConnections
     fetchHandler = new FetchHandler(conf, transportConf, workerSource)
     val transportContext: TransportContext =
       new TransportContext(
