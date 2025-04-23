@@ -22,11 +22,6 @@ kind: PodMonitor
 metadata:
   name: {{ .Release.Name }}-master-podmonitor
   labels:
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
     {{- include "celeborn.labels" . | nindent 4 }}
 spec:
   podMetricsEndpoints:
@@ -40,20 +35,13 @@ spec:
       - {{ .Release.Namespace }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Chart.Name }}
-      app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/role: master
+      {{- include "celeborn.masterSelectorLabels" . | nindent 6 }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: {{ .Release.Name }}-worker-podmonitor
   labels:
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
     {{- include "celeborn.labels" . | nindent 4 }}
 spec:
   podMetricsEndpoints:
@@ -67,8 +55,6 @@ spec:
       - {{ .Release.Namespace }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ .Chart.Name }}
-      app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/role: worker
+      {{- include "celeborn.workerSelectorLabels" . | nindent 6 }}
 {{ end }}
 {{- end }}

@@ -1,0 +1,141 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-conf
+  labels:
+    {{- include "celeborn.labels" . | nindent 4 }}
+data:
+  celeborn-defaults.conf: |-
+    {{- $namespace := .Release.Namespace }}
+    {{- $selectedPorts := index .Values.portMapping (toString .Values.service.port) -}}
+    {{- $endpointList := list }}
+    {{- $hosts := splitList "," .Values.masterHosts -}}
+    {{- range $host := $hosts }}
+    {{- $ep := printf "%s:%d" $host ($selectedPorts.master | int) -}}
+    {{- $endpointList = append $endpointList $ep }}
+    {{- end }}
+    celeborn.master.endpoints={{ join "," $endpointList }}
+    {{- range until (.Values.masterReplicas |int) }}
+    celeborn.master.ha.node.{{ . }}.host={{ index $hosts . }}
+    celeborn.master.ha.node.{{ . }}.port={{ $selectedPorts.master }}
+    celeborn.master.ha.node.{{ . }}.ratis.port={{ $selectedPorts.ratis }}
+    {{- end }}
+    {{- $dirs := .Values.volumes.master }}
+    celeborn.master.ha.ratis.raft.server.storage.dir={{ printf "%s/celeborn_ratis" (index $dirs 0).mountPath }}
+    {{- $path := "" }}
+    {{- range $worker := .Values.volumes.worker }}
+    {{- $info := (cat $worker.mountPath | nospace) }}
+    {{- if eq $path "" }}
+    {{- $path = $info }}
+    {{- else }}
+    {{- $path = ( list $path $info | join ",") }}
+    {{- end }}
+    {{- end }}
+    celeborn.worker.storage.dirs={{ $path }}
+    {{- $workerDirs := .Values.volumes.worker }}
+    celeborn.worker.graceful.shutdown.recoverPath={{ printf "%s/recover" (index $workerDirs 0).mountPath }}
+    {{- /* 工作节点端口配置 */}}
+    celeborn.worker.fetch.port={{ $selectedPorts.worker_fetch }}
+    celeborn.worker.rpc.port={{ $selectedPorts.worker_rpc }}
+    celeborn.worker.push.port={{ $selectedPorts.worker_push }}
+    celeborn.worker.replicate.port={{ $selectedPorts.worker_replicate }}
+    celeborn.metrics.master.prometheus.port={{ $selectedPorts.metrics_master }}
+    celeborn.metrics.worker.prometheus.port={{ $selectedPorts.metrics_worker }}
+    {{- range $key, $val := .Values.celeborn }}
+    {{ $key }}={{ $val }}
+    {{- end }}
+
+  celeborn-env.sh: |
+    {{- $workerDirs := .Values.volumes.worker }}
+    {{- $celebornLogDir := printf "%s/logs" (index $workerDirs 0).mountPath }}
+    CELEBORN_LOG_DIR={{ $celebornLogDir }}
+    CELEBORN_WORKER_JAVA_OPTS="-XX:-PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCDateStamps -Xloggc:{{ $celebornLogDir }}/gc-worker-$(date +%Y%m%d%H%M%S).out -Dio.netty.leakDetectionLevel=advanced"
+    CELEBORN_MASTER_JAVA_OPTS="-XX:-PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCDateStamps -Xloggc:{{ $celebornLogDir }}/gc-master-$(date +%Y%m%d%H%M%S).out -Dio.netty.leakDetectionLevel=advanced"
+    {{- range $key, $val := .Values.environments }}
+    {{ $key }}="{{ $val }}"
+    {{- end}} 
+
+  log4j2.xml: |-
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!--
+    ~ Licensed to the Apache Software Foundation (ASF) under one or more
+    ~ contributor license agreements.  See the NOTICE file distributed with
+    ~ this work for additional information regarding copyright ownership.
+    ~ The ASF licenses this file to You under the Apache License, Version 2.0
+    ~ (the "License"); you may not use this file except in compliance with
+    ~ the License.  You may obtain a copy of the License at
+    ~
+    ~     http://www.apache.org/licenses/LICENSE-2.0
+    ~
+    ~ Unless required by applicable law or agreed to in writing, software
+    ~ distributed under the License is distributed on an "AS IS" BASIS,
+    ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    ~ See the License for the specific language governing permissions and
+    ~ limitations under the License.
+    -->
+    <!--
+    ~ Extra logging related to initialization of Log4j.
+    ~ Set to debug or trace if log4j initialization is failing.
+    -->
+    <Configuration status="INFO">
+        <Appenders>
+            <Console name="stdout" target="SYSTEM_OUT">
+                <!--
+                  ~ In the pattern layout configuration below, we specify an explicit `%ex` conversion
+                  ~ pattern for logging Throwables. If this was omitted, then (by default) Log4J would
+                  ~ implicitly add an `%xEx` conversion pattern which logs stacktraces with additional
+                  ~ class packaging information. That extra information can sometimes add a substantial
+                  ~ performance overhead, so we disable it in our default logging config.
+                  -->
+                <PatternLayout pattern="%d{yy/MM/dd HH:mm:ss,SSS} %p [%t] %c{1}: %m%n%ex"/>
+            </Console>
+            <RollingRandomAccessFile name="file" fileName="${env:CELEBORN_LOG_DIR}/celeborn.log"
+                                     filePattern="${env:CELEBORN_LOG_DIR}/celeborn.log.%d-%i">
+                <PatternLayout pattern="%d{yy/MM/dd HH:mm:ss,SSS} %p [%t] %c{1}: %m%n%ex"/>
+                <Policies>
+                    <SizeBasedTriggeringPolicy size="1 GB"/>
+                </Policies>
+                <DefaultRolloverStrategy max="7">
+                    <Delete basePath="${env:CELEBORN_LOG_DIR}" maxDepth="1">
+                        <IfFileName glob="celeborn.log*">
+                            <IfAny>
+                                <IfAccumulatedFileSize exceeds="10 GB" />
+                                <IfAccumulatedFileCount exceeds="10" />
+                            </IfAny>
+                        </IfFileName>
+                    </Delete>
+                </DefaultRolloverStrategy>
+            </RollingRandomAccessFile>
+        </Appenders>
+
+        <Loggers>
+            <Root level="INFO">
+                <AppenderRef ref="stdout"/>
+                <AppenderRef ref="file"/>
+            </Root>
+            <Logger name="org.apache.hadoop.hdfs" level="WARN" additivity="false">
+                <Appender-ref ref="stdout" level="WARN" />
+                <Appender-ref ref="file" level="WARN"/>
+            </Logger>
+        </Loggers>
+    </Configuration>
+
+  metrics.properties: >-
+    *.sink.prometheusServlet.class=org.apache.celeborn.common.metrics.sink.PrometheusServlet

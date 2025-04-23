@@ -20,24 +20,28 @@ kind: ConfigMap
 metadata:
   name: {{ .Release.Name }}-conf
   labels:
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
     {{- include "celeborn.labels" . | nindent 4 }}
 data:
   celeborn-defaults.conf: |-
     {{- $namespace := .Release.Namespace }}
-    celeborn.master.endpoints={{ range until (.Values.masterReplicas |int) }}{{ $.Release.Name }}-master-{{ . }}.{{ $.Release.Name }}-master-svc.{{ $namespace }}.svc.{{ $.Values.cluster.name }}.local,{{ end }}
+    {{- $selectedPorts := index .Values.portMapping (toString .Values.service.port) -}}
+    {{- $endpointList := list }}
+    {{- $hosts := splitList "," .Values.masterHosts -}}
+    {{- range $host := $hosts }}
+    {{- $ep := printf "%s:%d" $host ($selectedPorts.master | int) -}}
+    {{- $endpointList = append $endpointList $ep }}
+    {{- end }}
+    celeborn.master.endpoints={{ join "," $endpointList }}
     {{- range until (.Values.masterReplicas |int) }}
-    celeborn.master.ha.node.{{ . }}.host={{ $.Release.Name }}-master-{{ . }}.{{ $.Release.Name }}-master-svc.{{ $namespace }}.svc.{{ $.Values.cluster.name }}.local
+    celeborn.master.ha.node.{{ . }}.host={{ index $hosts . }}
+    celeborn.master.ha.node.{{ . }}.port={{ $selectedPorts.master }}
+    celeborn.master.ha.node.{{ . }}.ratis.port={{ $selectedPorts.ratis }}
     {{- end }}
     {{- $dirs := .Values.volumes.master }}
-    celeborn.master.ha.ratis.raft.server.storage.dir={{ (index $dirs 0).mountPath }}
+    celeborn.master.ha.ratis.raft.server.storage.dir={{ printf "%s/celeborn_ratis" (index $dirs 0).mountPath }}
     {{- $path := "" }}
     {{- range $worker := .Values.volumes.worker }}
-    {{- $info := (cat $worker.mountPath ":disktype=" (get $worker "diskType" | default "HDD") ":capacity=" (get $worker "capacity" | default "1PB") | nospace) }}
+    {{- $info := (cat $worker.mountPath | nospace) }}
     {{- if eq $path "" }}
     {{- $path = $info }}
     {{- else }}
@@ -45,11 +49,25 @@ data:
     {{- end }}
     {{- end }}
     celeborn.worker.storage.dirs={{ $path }}
+    {{- $workerDirs := .Values.volumes.worker }}
+    celeborn.worker.graceful.shutdown.recoverPath={{ printf "%s/recover" (index $workerDirs 0).mountPath }}
+    {{- /* 工作节点端口配置 */}}
+    celeborn.worker.fetch.port={{ $selectedPorts.worker_fetch }}
+    celeborn.worker.rpc.port={{ $selectedPorts.worker_rpc }}
+    celeborn.worker.push.port={{ $selectedPorts.worker_push }}
+    celeborn.worker.replicate.port={{ $selectedPorts.worker_replicate }}
+    celeborn.metrics.master.prometheus.port={{ $selectedPorts.metrics_master }}
+    celeborn.metrics.worker.prometheus.port={{ $selectedPorts.metrics_worker }}
     {{- range $key, $val := .Values.celeborn }}
     {{ $key }}={{ $val }}
     {{- end }}
 
   celeborn-env.sh: |
+    {{- $workerDirs := .Values.volumes.worker }}
+    {{- $celebornLogDir := printf "%s/logs" (index $workerDirs 0).mountPath }}
+    CELEBORN_LOG_DIR={{ $celebornLogDir }}
+    CELEBORN_WORKER_JAVA_OPTS="-XX:-PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCDateStamps -Xloggc:{{ $celebornLogDir }}/gc-worker-$(date +%Y%m%d%H%M%S).out -Dio.netty.leakDetectionLevel=advanced"
+    CELEBORN_MASTER_JAVA_OPTS="-XX:-PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+PrintGCDateStamps -Xloggc:{{ $celebornLogDir }}/gc-master-$(date +%Y%m%d%H%M%S).out -Dio.netty.leakDetectionLevel=advanced"
     {{- range $key, $val := .Values.environments }}
     {{ $key }}="{{ $val }}"
     {{- end}} 
@@ -92,13 +110,13 @@ data:
                                      filePattern="${env:CELEBORN_LOG_DIR}/celeborn.log.%d-%i">
                 <PatternLayout pattern="%d{yy/MM/dd HH:mm:ss,SSS} %p [%t] %c{1}: %m%n%ex"/>
                 <Policies>
-                    <SizeBasedTriggeringPolicy size="200 MB"/>
+                    <SizeBasedTriggeringPolicy size="1 GB"/>
                 </Policies>
                 <DefaultRolloverStrategy max="7">
                     <Delete basePath="${env:CELEBORN_LOG_DIR}" maxDepth="1">
                         <IfFileName glob="celeborn.log*">
                             <IfAny>
-                                <IfAccumulatedFileSize exceeds="1 GB" />
+                                <IfAccumulatedFileSize exceeds="10 GB" />
                                 <IfAccumulatedFileCount exceeds="10" />
                             </IfAny>
                         </IfFileName>

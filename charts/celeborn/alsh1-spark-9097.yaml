@@ -19,7 +19,7 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# 集群新部署时的image版本
+# we provide a default celeborn image, you can also replace to your image
 releaseVersion: 0.4.0.10
 
 image:
@@ -38,7 +38,7 @@ imagePullSecrets:
 # master replicas should not less than 3
 masterReplicas: 3
 # worker replicas set on demand, should less than node number
-workerReplicas: 5
+workerReplicas: 19
 
 partition:
   master: 0
@@ -120,6 +120,7 @@ podExtraLabels:
   sd.xhs.com/service: xhs.data.emr-k8s.rss-k8s
   xhs.com/prdline: data
   sd.xhs.data.com/service: redspark
+
 
 environments:
   CELEBORN_MASTER_MEMORY: 48g
