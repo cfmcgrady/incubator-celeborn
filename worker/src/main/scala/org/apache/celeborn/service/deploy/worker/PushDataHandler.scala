@@ -1429,7 +1429,7 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
         fileWriter.write(body)
         result(index) = StatusCode.SUCCESS
       } catch {
-        case e: Exception =>
+        case e: Throwable =>
           if (e.isInstanceOf[AlreadyClosedException]) {
             val (mapId, attemptId) = getMapAttempt(body)
             val endedAttempt =
@@ -1441,7 +1441,7 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
               s" $attemptId), caused by AlreadyClosedException, endedAttempt $endedAttempt, error message: ${e.getMessage}")
             workerSource.incCounter(WorkerSource.WRITE_DATA_HARD_SPLIT_COUNT)
             result(index) = StatusCode.HARD_SPLIT
-          } else {
+          } else { // OutOfDirectMemoryError should also finish write promise
             logError("Exception encountered when write.", e)
             workerSource.incCounter(WorkerSource.WRITE_DATA_FAIL_COUNT)
             val cause =
