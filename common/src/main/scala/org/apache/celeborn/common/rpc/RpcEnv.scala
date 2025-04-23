@@ -18,12 +18,12 @@
 package org.apache.celeborn.common.rpc
 
 import java.io.File
+
 import scala.concurrent.Future
+
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.metrics.source.AbstractSource
 import org.apache.celeborn.common.rpc.netty.NettyRpcEnvFactory
-
-import scala.annotation.tailrec
 
 /**
  * A RpcEnv implementation must have a [[RpcEnvFactory]] implementation with an empty constructor
