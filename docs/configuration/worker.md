@@ -28,10 +28,10 @@ license: |
 | celeborn.storage.hdfs.dir | &lt;undefined&gt; | HDFS base directory for Celeborn to store shuffle data. | 0.2.0 |  | 
 | celeborn.storage.hdfs.kerberos.keytab | &lt;undefined&gt; | Kerberos keytab file path for HDFS storage connection. | 0.3.2 |  | 
 | celeborn.storage.hdfs.kerberos.principal | &lt;undefined&gt; | Kerberos principal for HDFS storage connection. | 0.3.2 |  | 
+| celeborn.worker.&lt;module&gt;.closeIdleConnections | false | Whether worker will close idle connections. If setting <module> to `push`, it works for worker receiving push data. If setting <module> to `rpc`, it works for worker rpc server. If setting <module> to `data`, it works for shuffle client push and fetch data. If setting <module> to `fetch`, it works for worker fetch server.If setting <module> to `replicate`, it works for replicate server.  |  |  | 
 | celeborn.worker.activeConnection.max | &lt;undefined&gt; | If the number of active connections on a worker exceeds this configuration value, the worker will be marked as high-load in the heartbeat report, and the master will not include that node in the response of RequestSlots. | 0.3.1 |  | 
 | celeborn.worker.bufferStream.threadsPerMountpoint | 8 | Threads count for read buffer per mount point. | 0.3.0 |  | 
 | celeborn.worker.clean.threads | 64 | Thread number of worker to clean up expired shuffle keys. | 0.3.2 |  | 
-| celeborn.worker.closeIdleConnections | false | Whether worker will close idle connections. | 0.2.0 |  | 
 | celeborn.worker.commitFiles.threads | 32 | Thread number of worker to commit shuffle data files asynchronously. It's recommended to set at least `128` when `HDFS` is enabled in `celeborn.storage.activeTypes`. | 0.3.0 | celeborn.worker.commit.threads | 
 | celeborn.worker.commitFiles.timeout | 120s | Timeout for a Celeborn worker to commit files of a shuffle. It's recommended to set at least `240s` when `HDFS` is enabled in `celeborn.storage.activeTypes`. | 0.3.0 | celeborn.worker.shuffle.commit.timeout | 
 | celeborn.worker.commitFiles.wait.threads | 32 | Thread number of worker to wait for commit shuffle data files to finish. | 0.5.0 |  | 
