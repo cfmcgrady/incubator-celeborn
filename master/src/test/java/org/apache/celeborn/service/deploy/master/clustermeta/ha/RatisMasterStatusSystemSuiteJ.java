@@ -81,9 +81,9 @@ public class RatisMasterStatusSystemSuiteJ {
       RATISSERVER3.stop();
     }
 
-    STATUSSYSTEM1 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf());
-    STATUSSYSTEM2 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf());
-    STATUSSYSTEM3 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf());
+    STATUSSYSTEM1 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf(), null);
+    STATUSSYSTEM2 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf(), null);
+    STATUSSYSTEM3 = new HAMasterMetaManager(mockRpcEnv, new CelebornConf(), null);
 
     MetaHandler handler1 = new MetaHandler(STATUSSYSTEM1);
     MetaHandler handler2 = new MetaHandler(STATUSSYSTEM2);

@@ -93,6 +93,8 @@ enum MessageType {
   GET_SHUFFLE_ID_RESPONSE = 70;
   SASL_REQUEST = 71;
   PUSH_MERGED_DATA_SPLIT_PARTITION_INFO = 91;
+  REPORT_FAILURE = 92;
+  REPORT_FAILURE_RESPONSE=93;
 }
 
 enum StreamType {
@@ -332,9 +334,19 @@ message PbGetShuffleIdResponse {
 message PbReportShuffleFetchFailure {
   int32 appShuffleId = 1;
   int32 shuffleId = 2;
+  int32 failureType = 3;
+}
+
+message PbReportFailure {
+  int32 failureType = 1;
+  string appId = 2;
 }
 
 message PbReportShuffleFetchFailureResponse {
+  bool success = 1;
+}
+
+message PbReportFailureResponse {
   bool success = 1;
 }
 

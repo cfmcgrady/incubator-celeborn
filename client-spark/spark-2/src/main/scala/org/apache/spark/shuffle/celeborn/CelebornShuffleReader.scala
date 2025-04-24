@@ -20,19 +20,18 @@ package org.apache.spark.shuffle.celeborn
 import java.io.IOException
 import java.util.concurrent.{ConcurrentHashMap, ThreadPoolExecutor, TimeUnit}
 import java.util.concurrent.atomic.AtomicReference
-
 import org.apache.spark.{InterruptibleIterator, TaskContext}
 import org.apache.spark.internal.Logging
 import org.apache.spark.shuffle.{FetchFailedException, ShuffleReader}
 import org.apache.spark.shuffle.celeborn.CelebornShuffleReader.streamCreatorPool
 import org.apache.spark.util.CompletionIterator
 import org.apache.spark.util.collection.ExternalSorter
-
 import org.apache.celeborn.client.ShuffleClient
 import org.apache.celeborn.client.read.CelebornInputStream
 import org.apache.celeborn.client.read.MetricsCallback
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.exception.{CelebornIOException, PartitionUnRetryAbleException}
+import org.apache.celeborn.common.protocol.message.FailureType
 import org.apache.celeborn.common.util.ThreadUtils
 
 class CelebornShuffleReader[K, C](
@@ -122,8 +121,12 @@ class CelebornShuffleReader[K, C](
           if (exceptionRef.get() != null) {
             exceptionRef.get() match {
               case ce @ (_: CelebornIOException | _: PartitionUnRetryAbleException) =>
+                val failureType = ce match {
+                  case ex: CelebornIOException if ex.getFailureType != null && ex.getFailureType != FailureType.UNKNOWN => ex.getFailureType
+                  case _ => FailureType.FETCH_FAILED
+                }
                 if (handle.throwsFetchFailure &&
-                  shuffleClient.reportShuffleFetchFailure(handle.shuffleId, shuffleId)) {
+                  shuffleClient.reportShuffleFetchFailure(handle.shuffleId, shuffleId, failureType)) {
                   throw new FetchFailedException(
                     null,
                     handle.shuffleId,
@@ -131,8 +134,12 @@ class CelebornShuffleReader[K, C](
                     partitionId,
                     SparkUtils.FETCH_FAILURE_ERROR_MSG + shuffleId,
                     ce)
-                } else
+                } else {
+                  if (!handle.throwsFetchFailure) {
+                    shuffleClient.reportFailure(failureType)
+                  }
                   throw ce
+                }
               case e => throw e
             }
           }
@@ -154,8 +161,12 @@ class CelebornShuffleReader[K, C](
         iter
       } catch {
         case e @ (_: CelebornIOException | _: PartitionUnRetryAbleException) =>
+          val failureType = e match {
+            case ex: CelebornIOException if ex.getFailureType != null && ex.getFailureType != FailureType.UNKNOWN => ex.getFailureType
+            case _ => FailureType.FETCH_FAILED
+          }
           if (handle.throwsFetchFailure &&
-            shuffleClient.reportShuffleFetchFailure(handle.shuffleId, shuffleId)) {
+            shuffleClient.reportShuffleFetchFailure(handle.shuffleId, shuffleId, failureType)) {
             throw new FetchFailedException(
               null,
               handle.shuffleId,
@@ -164,6 +175,9 @@ class CelebornShuffleReader[K, C](
               SparkUtils.FETCH_FAILURE_ERROR_MSG + shuffleId,
               e)
           } else
+            if (!handle.throwsFetchFailure) {
+              shuffleClient.reportFailure(failureType)
+            }
             throw e
       }
     }

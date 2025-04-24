@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import com.google.common.base.Throwables;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import org.apache.celeborn.common.metrics.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,12 +52,15 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
 
   /** Handles all RPC messages. */
   private final BaseMessageHandler msgHandler;
+  
+  private final AbstractSource source;
 
   public TransportRequestHandler(
-      Channel channel, TransportClient reverseClient, BaseMessageHandler msgHandler) {
+          Channel channel, TransportClient reverseClient, BaseMessageHandler msgHandler, AbstractSource source) {
     this.channel = channel;
     this.reverseClient = reverseClient;
     this.msgHandler = msgHandler;
+    this.source = source;
   }
 
   @Override
@@ -99,11 +103,18 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
           new RpcResponseCallback() {
             @Override
             public void onSuccess(ByteBuffer response) {
+              if (null != source) {
+                source.addTotalRpcCount(1);
+              }
               respond(new RpcResponse(req.requestId, new NioManagedBuffer(response)));
             }
 
             @Override
             public void onFailure(Throwable e) {
+              if (null != source) {
+                source.addFailedRpcCount(1);
+                source.addTotalRpcCount(1);
+              }
               respond(new RpcFailure(req.requestId, Throwables.getStackTraceAsString(e)));
             }
           });

@@ -18,11 +18,12 @@
 package org.apache.celeborn.common.exception
 
 import java.io.IOException
-
-import org.apache.celeborn.common.protocol.message.StatusCode
+import org.apache.celeborn.common.protocol.message.{FailureType, StatusCode}
 
 class CelebornIOException(message: String, cause: Throwable)
   extends IOException(message, cause) {
+
+  private var failureType: FailureType = FailureType.UNKNOWN
 
   def this(message: String) = this(message, null)
 
@@ -31,4 +32,11 @@ class CelebornIOException(message: String, cause: Throwable)
   def this(statusCode: StatusCode) = this(statusCode.name())
 
   def this(statusCode: StatusCode, cause: Throwable) = this(statusCode.name(), cause)
+
+  def this(failureType: FailureType, message: String, cause: Throwable) = {
+    this(message, cause)
+    this.failureType = failureType
+  }
+  
+  def getFailureType: FailureType = failureType
 }

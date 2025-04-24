@@ -45,6 +45,9 @@ class WorkerSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   addCounter(ACTIVE_CONNECTION_COUNT)
 
   addCounter(SLOTS_ALLOCATED)
+  
+  addCounter(RPC_COUNT)
+  addCounter(RPC_FAILED_COUNT)
 
   // add timers
   addTimer(COMMIT_FILES_TIME)
@@ -71,6 +74,14 @@ class WorkerSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   }
   // start cleaner thread
   startCleaner()
+
+  override def addFailedRpcCount(delta: Long): Unit = {
+    incCounter(RPC_FAILED_COUNT, delta)
+  }
+
+  override def addTotalRpcCount(delta: Long): Unit = {
+    incCounter(RPC_COUNT, delta)
+  }
 }
 
 object WorkerSource {
@@ -156,4 +167,9 @@ object WorkerSource {
   // active shuffle
   val ACTIVE_SHUFFLE_SIZE = "ActiveShuffleSize"
   val ACTIVE_SHUFFLE_FILE_COUNT = "ActiveShuffleFileCount"
+  
+  // rpc
+  val RPC_COUNT = "RpcCount"
+
+  val RPC_FAILED_COUNT = "RpcFailedCount"
 }

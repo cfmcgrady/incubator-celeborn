@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,8 +167,13 @@ public class DummyShuffleClient extends ShuffleClient {
   }
 
   @Override
-  public boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId) {
+  public boolean reportShuffleFetchFailure(int appShuffleId, int shuffleId, FailureType failureType) {
     return true;
+  }
+
+  @Override
+  public void reportFailure(FailureType failureType) {
+
   }
 
   public void initReducePartitionMap(int shuffleId, int numPartitions, int workerNum) {

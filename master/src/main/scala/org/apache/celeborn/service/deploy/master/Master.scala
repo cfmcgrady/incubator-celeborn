@@ -22,14 +22,11 @@ import java.net.BindException
 import java.util
 import java.util.concurrent.{ConcurrentHashMap, ScheduledFuture, TimeUnit}
 import java.util.function.ToLongFunction
-
 import scala.collection.JavaConverters._
 import scala.util.Random
-
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.ratis.proto.RaftProtos
 import org.apache.ratis.proto.RaftProtos.RaftPeerRole
-
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.identity.UserIdentifier
@@ -38,7 +35,7 @@ import org.apache.celeborn.common.meta.{DiskInfo, WorkerInfo}
 import org.apache.celeborn.common.metrics.MetricsSystem
 import org.apache.celeborn.common.metrics.source.{JVMCPUSource, JVMSource, ResourceConsumptionSource, SystemMiscSource, ThreadPoolSource}
 import org.apache.celeborn.common.protocol._
-import org.apache.celeborn.common.protocol.message.{ControlMessages, StatusCode}
+import org.apache.celeborn.common.protocol.message.{ControlMessages, FailureType, StatusCode}
 import org.apache.celeborn.common.protocol.message.ControlMessages._
 import org.apache.celeborn.common.quota.{QuotaManager, ResourceConsumption}
 import org.apache.celeborn.common.rpc._
@@ -79,11 +76,12 @@ private[celeborn] class Master(
     masterArgs.host,
     masterArgs.port,
     conf,
-    Math.max(64, Runtime.getRuntime.availableProcessors()))
+    Math.max(64, Runtime.getRuntime.availableProcessors()),
+    masterSource)
 
   private val statusSystem =
     if (conf.haEnabled) {
-      val sys = new HAMasterMetaManager(rpcEnv, conf)
+      val sys = new HAMasterMetaManager(rpcEnv, conf, masterSource)
       val handler = new MetaHandler(sys)
       try {
         handler.setUpMasterRatisServer(conf, masterArgs.masterClusterInfo.get)
@@ -101,7 +99,7 @@ private[celeborn] class Master(
       }
       sys
     } else {
-      new SingleMasterMetaManager(rpcEnv, conf)
+      new SingleMasterMetaManager(rpcEnv, conf, masterSource)
     }
 
   metricsSystem.registerSource(rpcEnv.rpcSource())
@@ -446,6 +444,17 @@ private[celeborn] class Master(
 
     case _: PbCheckWorkersAvailable =>
       executeWithLeaderChecker(context, handleCheckWorkersAvailable(context))
+
+    case pb: PbReportFailure =>
+      val failureType = FailureType.fromValue(pb.getFailureType)
+      val appId = pb.getAppId
+      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
+      executeWithLeaderChecker(context, handleReportFailure(context, failureType, appId)) 
+  }
+  
+  private def handleReportFailure(context: RpcCallContext, failureType: FailureType, appId: String): Unit = {
+    statusSystem.handleReportFailure(failureType, appId)
+    context.reply(PbReportFailureResponse.newBuilder().setSuccess(true).build())
   }
 
   private def timeoutDeadWorkers(): Unit = {

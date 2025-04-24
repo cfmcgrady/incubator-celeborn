@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -237,6 +238,11 @@ public class MetaHandler {
         case UpdatePartitionSize:
           metaSystem.updatePartitionSize();
           break;
+
+        case ReportFailure:
+          String appUniqId = request.getReportFailureRequest().getAppId();
+          FailureType failureType = FailureType.fromValue(request.getReportFailureRequest().getFailureType());
+          metaSystem.updateFailureCount(failureType, appUniqId);
 
         case RemoveWorkersUnavailableInfo:
           List<ResourceProtos.WorkerAddress> unavailableList =

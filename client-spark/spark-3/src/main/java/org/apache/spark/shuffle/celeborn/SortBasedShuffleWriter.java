@@ -20,6 +20,7 @@ package org.apache.spark.shuffle.celeborn;
 import java.io.IOException;
 import java.util.concurrent.atomic.LongAdder;
 
+import org.apache.celeborn.common.protocol.message.FailureType;
 import scala.Option;
 import scala.Product2;
 import scala.reflect.ClassTag;
@@ -174,18 +175,27 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
 
   @Override
   public void write(scala.collection.Iterator<Product2<K, V>> records) throws IOException {
-    if (canUseFastWrite()) {
-      fastWrite0(records);
-    } else if (dep.mapSideCombine()) {
-      if (dep.aggregator().isEmpty()) {
-        throw new UnsupportedOperationException(
-            "When using map side combine, an aggregator must be specified.");
+    try {
+      if (canUseFastWrite()) {
+        fastWrite0(records);
+      } else if (dep.mapSideCombine()) {
+        if (dep.aggregator().isEmpty()) {
+          throw new UnsupportedOperationException(
+                  "When using map side combine, an aggregator must be specified.");
+        }
+        write0(dep.aggregator().get().combineValuesByKey(records, taskContext));
+      } else {
+        write0(records);
       }
-      write0(dep.aggregator().get().combineValuesByKey(records, taskContext));
-    } else {
-      write0(records);
+      close();
+    } catch (CelebornIOException e) {
+      logger.error("write failed, {}", e.getFailureType(), e);
+      if (e.getFailureType() != null && e.getFailureType() != FailureType.UNKNOWN) {
+        shuffleClient.reportFailure(e.getFailureType());
+      }
+      throw e;
     }
-    close();
+
   }
 
   @VisibleForTesting

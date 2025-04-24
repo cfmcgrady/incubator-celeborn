@@ -20,6 +20,8 @@ package org.apache.celeborn.service.deploy.master.clustermeta;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.celeborn.common.metrics.source.AbstractSource;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,13 +37,14 @@ import org.apache.celeborn.service.deploy.master.network.CelebornRackResolver;
 public class SingleMasterMetaManager extends AbstractMetaManager {
   private static final Logger LOG = LoggerFactory.getLogger(SingleMasterMetaManager.class);
 
-  public SingleMasterMetaManager(RpcEnv rpcEnv, CelebornConf conf) {
+  public SingleMasterMetaManager(RpcEnv rpcEnv, CelebornConf conf, AbstractSource source) {
     this.rpcEnv = rpcEnv;
     this.conf = conf;
     this.initialEstimatedPartitionSize = conf.initialEstimatedPartitionSize();
     this.estimatedPartitionSize = initialEstimatedPartitionSize;
     this.appDiskUsageMetric = new AppDiskUsageMetric(conf);
     this.rackResolver = new CelebornRackResolver(conf);
+    this.source = source;
   }
 
   @Override
@@ -141,5 +144,10 @@ public class SingleMasterMetaManager extends AbstractMetaManager {
   @Override
   public void handleUpdatePartitionSize() {
     updatePartitionSize();
+  }
+
+  @Override
+  public void handleReportFailure(FailureType failureType, String appId) {
+    updateFailureCount(failureType, appId);
   }
 }

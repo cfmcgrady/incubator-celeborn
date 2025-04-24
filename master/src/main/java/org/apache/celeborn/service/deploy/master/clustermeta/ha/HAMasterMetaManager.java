@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.celeborn.common.metrics.source.AbstractSource;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,13 +47,14 @@ public class HAMasterMetaManager extends AbstractMetaManager {
 
   protected HARaftServer ratisServer;
 
-  public HAMasterMetaManager(RpcEnv rpcEnv, CelebornConf conf) {
+  public HAMasterMetaManager(RpcEnv rpcEnv, CelebornConf conf, AbstractSource source) {
     this.rpcEnv = rpcEnv;
     this.conf = conf;
     this.initialEstimatedPartitionSize = conf.initialEstimatedPartitionSize();
     this.estimatedPartitionSize = initialEstimatedPartitionSize;
     this.appDiskUsageMetric = new AppDiskUsageMetric(conf);
     this.rackResolver = new CelebornRackResolver(conf);
+    this.source = source;
   }
 
   public HARaftServer getRatisServer() {
@@ -341,5 +344,27 @@ public class HAMasterMetaManager extends AbstractMetaManager {
       LOG.error("Handle update partition size failed!", e);
       throw e;
     }
+  }
+
+  @Override
+  public void handleReportFailure(FailureType failureType, String appId) {
+    try {
+      ratisServer.submitRequest(
+              ResourceRequest.newBuilder()
+                      .setCmdType(Type.ReportFailure)
+                      .setRequestId(MasterClient.genRequestId())
+                      .setReportFailureRequest(
+                              ResourceProtos.ReportFailureRequest.newBuilder()
+                                      .setAppId(appId)
+                                      .setFailureType(failureType.getValue())
+                                      .build()
+                      )
+                      .build()
+      );
+    } catch (CelebornRuntimeException e) {
+      LOG.error("Handle report failure {} appId {} failed!", failureType, appId, e);
+      throw e;
+    }
+
   }
 }

@@ -37,6 +37,7 @@ enum Type {
   WorkerRemove = 22;
   RemoveWorkersUnavailableInfo = 23;
   WorkerExclude = 24;
+  ReportFailure = 25;
 }
 
 message ResourceRequest {
@@ -57,6 +58,7 @@ message ResourceRequest {
   optional WorkerRemoveRequest workerRemoveRequest = 19;
   optional RemoveWorkersUnavailableInfoRequest removeWorkersUnavailableInfoRequest = 20;
   optional WorkerExcludeRequest workerExcludeRequest = 21;
+  optional ReportFailureRequest reportFailureRequest = 22;
 }
 
 message DiskInfo {
@@ -94,6 +96,11 @@ message AppHeartbeatRequest {
   required int64 time = 2;
   required int64 totalWritten = 3;
   required int64 fileCount = 4;
+}
+
+message ReportFailureRequest {
+  required string appId = 1;
+  required int32 failureType = 2;
 }
 
 message AppLostRequest {
