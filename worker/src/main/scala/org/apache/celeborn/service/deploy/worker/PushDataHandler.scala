@@ -472,8 +472,17 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
       }
 
     // Fetch real batchId from body will add more cost and no meaning for replicate.
-    val doReplicate =
-      partitionIdToLocations.head._2 != null && partitionIdToLocations.head._2.hasPeer && isPrimary
+    var firstToReplicateLocation: PartitionLocation = null
+    val iterator = partitionIdToLocations.iterator
+    var foundFirstToReplicateLocation = false
+    while (iterator.hasNext && !foundFirstToReplicateLocation) {
+      val p = iterator.next()
+      if (p._2 != null && p._2.hasPeer) {
+        firstToReplicateLocation = p._2
+        foundFirstToReplicateLocation = true
+      }
+    }
+    val doReplicate = isPrimary && foundFirstToReplicateLocation
 
     // find FileWriters responsible for the data
     var index = 0
@@ -586,7 +595,7 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
       pushMergedData.body().retain()
       replicateThreadPool.submit(new Runnable {
         override def run(): Unit = {
-          val location = partitionIdToLocations.head._2
+          val location = firstToReplicateLocation
           val peer = location.getPeer
           val peerWorker = new WorkerInfo(
             peer.getHost,
@@ -607,38 +616,6 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
           // Handle the response from replica
           val wrappedCallback = new RpcResponseCallback() {
             override def onSuccess(response: ByteBuffer): Unit = {
-              val replicaReason = response.get()
-              if (replicaReason == StatusCode.HARD_SPLIT.getValue) {
-                if (response.remaining() > 0) {
-                  try {
-                    val pushMergedDataResponse: PbPushMergedDataSplitPartitionInfo =
-                      TransportMessage.fromByteBuffer(
-                        response).getParsedPayload[PbPushMergedDataSplitPartitionInfo]()
-                    pushMergedDataCallback.unionReplicaSplitPartitions(
-                      pushMergedDataResponse.getSplitPartitionIndexesList,
-                      pushMergedDataResponse.getStatusCodesList)
-                  } catch {
-                    case e: CelebornIOException =>
-                      pushMergedDataCallback.onFailure(e)
-                      return
-                    case e: IllegalArgumentException =>
-                      pushMergedDataCallback.onFailure(new CelebornIOException(e))
-                      return
-                  }
-                } else {
-                  // During the rolling upgrade of the worker cluster, it is possible for the primary worker
-                  // to be upgraded to a new version that includes the changes from [CELEBORN-1721], while
-                  // the replica worker is still running on an older version that does not have these changes.
-                  // In this scenario, the replica may return a response with a status of HARD_SPLIT, but
-                  // will not provide a PbPushMergedDataSplitPartitionInfo.
-                  logWarning(
-                    s"The response status from the replica (shuffle $shuffleKey map $mapId attempt $attemptId) is HARD_SPLIT, but no PbPushMergedDataSplitPartitionInfo is present.")
-                  partitionIdToLocations.indices.foreach(index =>
-                    pushMergedDataCallback.addSplitPartition(index, StatusCode.HARD_SPLIT))
-                  pushMergedDataCallback.onSuccess(StatusCode.HARD_SPLIT)
-                  return
-                }
-              }
               Try(Await.result(writePromise.future, Duration.Inf)) match {
                 case Success(result) =>
                   var index = 0
@@ -648,6 +625,39 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
                     }
                     index += 1
                   }
+                  val replicaReason = response.get()
+                  if (replicaReason == StatusCode.HARD_SPLIT.getValue) {
+                    if (response.remaining() > 0) {
+                      try {
+                        val pushMergedDataResponse: PbPushMergedDataSplitPartitionInfo =
+                          TransportMessage.fromByteBuffer(
+                            response).getParsedPayload[PbPushMergedDataSplitPartitionInfo]()
+                        pushMergedDataCallback.unionReplicaSplitPartitions(
+                          pushMergedDataResponse.getSplitPartitionIndexesList,
+                          pushMergedDataResponse.getStatusCodesList)
+                      } catch {
+                        case e: CelebornIOException =>
+                          pushMergedDataCallback.onFailure(e)
+                          return
+                        case e: IllegalArgumentException =>
+                          pushMergedDataCallback.onFailure(new CelebornIOException(e))
+                          return
+                      }
+                    } else {
+                      // During the rolling upgrade of the worker cluster, it is possible for the primary worker
+                      // to be upgraded to a new version that includes the changes from [CELEBORN-1721], while
+                      // the replica worker is still running on an older version that does not have these changes.
+                      // In this scenario, the replica may return a response with a status of HARD_SPLIT, but
+                      // will not provide a PbPushMergedDataSplitPartitionInfo.
+                      logWarning(
+                        s"The response status from the replica (shuffle $shuffleKey map $mapId attempt $attemptId) is HARD_SPLIT, but no PbPushMergedDataSplitPartitionInfo is present.")
+                      partitionIdToLocations.indices.foreach(index =>
+                        pushMergedDataCallback.addSplitPartition(index, StatusCode.HARD_SPLIT))
+                    }
+                    pushMergedDataCallback.onSuccess(StatusCode.HARD_SPLIT)
+                    return
+                  }
+
                   // Only primary data enable replication will push data to replica
                   Option(CongestionController.instance()) match {
                     case Some(congestionController) if fileWriters.nonEmpty =>
