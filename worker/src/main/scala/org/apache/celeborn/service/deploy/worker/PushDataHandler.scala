@@ -476,9 +476,9 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
     val iterator = partitionIdToLocations.iterator
     var foundFirstToReplicateLocation = false
     while (iterator.hasNext && !foundFirstToReplicateLocation) {
-      val p = iterator.next()
-      if (p._2 != null && p._2.hasPeer) {
-        firstToReplicateLocation = p._2
+      val (_, p) = iterator.next()
+      if (p != null && p.hasPeer) {
+        firstToReplicateLocation = p
         foundFirstToReplicateLocation = true
       }
     }
