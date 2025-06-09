@@ -20,6 +20,7 @@ package org.apache.celeborn.service.deploy.worker.storage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,6 +29,7 @@ import javax.annotation.concurrent.GuardedBy;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
+import org.apache.celeborn.common.exception.CelebornIOException;
 import org.roaringbitmap.RoaringBitmap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,6 +88,7 @@ public abstract class FileWriter implements DeviceObserver {
   private String shuffleKey;
   private StorageManager storageManager;
   private boolean workerGracefulShutdown;
+  public int testMockGetReplicaChunkBlock;
 
   public FileWriter(
       FileInfo fileInfo,
@@ -108,6 +111,7 @@ public abstract class FileWriter implements DeviceObserver {
     this.splitMode = splitMode;
     this.partitionType = partitionType;
     this.rangeReadFilter = rangeReadFilter;
+    this.testMockGetReplicaChunkBlock = conf.testMockGetReplicaChunkBlock();
     if (!fileInfo.isHdfs()) {
       this.flusherBufferSize = conf.workerFlusherBufferSize();
       channel = FileChannelUtils.createWritableFileChannel(fileInfo.getFilePath());
@@ -190,12 +194,18 @@ public abstract class FileWriter implements DeviceObserver {
     }
 
     int mapId = 0;
-    if (rangeReadFilter) {
+    if (rangeReadFilter || testMockGetReplicaChunkBlock != 0) {
       byte[] header = new byte[4];
       data.markReaderIndex();
       data.readBytes(header);
       data.resetReaderIndex();
       mapId = Platform.getInt(header, Platform.BYTE_ARRAY_OFFSET);
+      if (testMockGetReplicaChunkBlock !=0 && mapId == 1) {
+        String fileName = fileInfo.getFilePath().split("/")[fileInfo.getFilePath().split("/").length-1];
+        if (Objects.equals(fileName, "3-0-1")) {
+          throw new CelebornIOException("mock skewed replica location write failure");
+        }
+      }
     }
 
     final int numBytes = data.readableBytes();

@@ -317,7 +317,9 @@ private[deploy] class Controller(
                     storageInfo.setChunkOffsets(fileWriter.getFileInfo.getChunkOffsets)
                     committedStorageInfos.put(uniqueId, storageInfo)
                     if (fileWriter.getMapIdBitMap != null) {
-                      committedMapIdBitMap.put(uniqueId, fileWriter.getMapIdBitMap)
+                      if (fileWriter.testMockGetReplicaChunkBlock == 0 || location.getMode == PartitionLocation.Mode.PRIMARY) {
+                        committedMapIdBitMap.put(uniqueId, fileWriter.getMapIdBitMap)
+                      }
                     }
                     if (bytes >= minPartitionSizeToEstimate) {
                       partitionSizeList.add(bytes)

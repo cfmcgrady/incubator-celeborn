@@ -1120,6 +1120,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def testFetchFailure: Boolean = get(TEST_CLIENT_FETCH_FAILURE)
   def testMockDestroySlotsFailure: Boolean = get(TEST_CLIENT_MOCK_DESTROY_SLOTS_FAILURE)
   def testMockCommitFilesFailure: Boolean = get(TEST_MOCK_COMMIT_FILES_FAILURE)
+  def testMockGetReplicaChunkBlock: Int = get(TEST_MOCK_GET_REPLICA_CHUNK_BLOCK)
   def testPushPrimaryDataTimeout: Boolean = get(TEST_CLIENT_PUSH_PRIMARY_DATA_TIMEOUT)
   def testPushReplicaDataTimeout: Boolean = get(TEST_WORKER_PUSH_REPLICA_DATA_TIMEOUT)
   def testRetryRevive: Boolean = get(TEST_CLIENT_RETRY_REVIVE)
@@ -3259,6 +3260,15 @@ object CelebornConf extends Logging {
       .version("0.3.2")
       .booleanConf
       .createWithDefault(false)
+
+  val TEST_MOCK_GET_REPLICA_CHUNK_BLOCK: ConfigEntry[Int] =
+    buildConf("celeborn.test.mockGetReplicaChunkBlock")
+      .internal
+      .categories("test", "client", "worker")
+      .doc("Fail getNextChunk for test. 0 for no mock; 1 for mock at getFirstChunk; 2 for mock at moveToNextReader; 3 for mock at moveToNextChunk.")
+      .version("0.4.0")
+      .intConf
+      .createWithDefault(0)
 
   val CLIENT_PUSH_REPLICATE_ENABLED: ConfigEntry[Boolean] =
     buildConf("celeborn.client.push.replicate.enabled")
