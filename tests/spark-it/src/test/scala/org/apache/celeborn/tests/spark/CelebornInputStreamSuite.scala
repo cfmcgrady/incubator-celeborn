@@ -38,7 +38,7 @@ class CelebornInputStreamSuite extends AnyFunSuite
   override def beforeAll(): Unit = {
     logInfo("test initialized , setup Celeborn mini cluster")
     val workerConf = Map(
-      "celeborn.shuffle.chunk.size" -> "10k",
+      "celeborn.shuffle.chunk.size" -> "3k",
       "celeborn.test.mockGetReplicaChunkBlock" -> "1")
     setUpMiniCluster(workerConf=workerConf, workerNum = 5)
   }
@@ -72,7 +72,7 @@ class CelebornInputStreamSuite extends AnyFunSuite
   private def enableCeleborn(conf: SparkConf) = {
     conf.set("spark.shuffle.manager", "org.apache.spark.shuffle.celeborn.SparkShuffleManager")
       .set(s"spark.${CelebornConf.MASTER_ENDPOINTS.key}", masterInfo._1.rpcEnv.address.toString)
-      .set(s"spark.${CelebornConf.SHUFFLE_PARTITION_SPLIT_THRESHOLD.key}", "3MB")
+      .set(s"spark.${CelebornConf.SHUFFLE_PARTITION_SPLIT_THRESHOLD.key}", "1MB")
   }
 
   def testGetNextChunk(mockGetReplicaChunkBlock:Int = 0): Unit = {
@@ -82,8 +82,8 @@ class CelebornInputStreamSuite extends AnyFunSuite
       .set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, "true")
       .set("spark.sql.adaptive.skewJoin.enabled", "true")
       .set("spark.sql.adaptive.coalescePartitions.enabled", "false")
-      .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "1MB")
-      .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "1MB")
+      .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "500KB")
+      .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "500KB")
       .set("spark.sql.adaptive.skewJoin.skewedPartitionFactor","2")
       .set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
       .set(SQLConf.PARQUET_COMPRESSION.key, "gzip")
@@ -108,7 +108,7 @@ class CelebornInputStreamSuite extends AnyFunSuite
       (key, s"FieldA-$i", s"FieldB-$i", s"FieldC-$i", s"FieldD-$i")
     })
 
-    val skewedSize = 3000000
+    val skewedSize = 1000000
     val skewedData = (1 to skewedSize).map(i => (1, s"fsa-$i", s"fsb-$i", s"fsc-$i", s"fsd-$i"))
     val allData = skewedData ++ nonSkewedData
     val df = sparkSession.sparkContext.parallelize(allData, 8).toDF("fa", "f1", "f2", "f3", "f4")
@@ -134,6 +134,6 @@ class CelebornInputStreamSuite extends AnyFunSuite
     val result = sparkSession.sql("select count(*) from fres where fa=1").collect()(0).getLong(0)
     sparkSession.sql("drop table fres")
     sparkSession.stop()
-    assert(result == 6000000, s"Expected 200000 rows but got $result")
+    assert(result == 2000000, s"Expected 2000000 rows but got $result")
   }
 }
