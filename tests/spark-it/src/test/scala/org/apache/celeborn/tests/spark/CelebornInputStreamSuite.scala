@@ -43,6 +43,12 @@ class CelebornInputStreamSuite extends AnyFunSuite
     setUpMiniCluster(workerConf=workerConf, workerNum = 5)
   }
 
+  override def afterAll(): Unit = {
+    logInfo("all test complete , stop Celeborn mini cluster")
+    shutdownMiniCluster()
+    System.gc()
+  }
+
   override def beforeEach(): Unit = {
     ShuffleClient.reset()
   }

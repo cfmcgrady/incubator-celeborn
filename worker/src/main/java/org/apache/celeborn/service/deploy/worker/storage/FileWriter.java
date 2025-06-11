@@ -88,7 +88,7 @@ public abstract class FileWriter implements DeviceObserver {
   private String shuffleKey;
   private StorageManager storageManager;
   private boolean workerGracefulShutdown;
-  public int testMockGetReplicaChunkBlock;
+  private final int testMockGetReplicaChunkBlock;
 
   public FileWriter(
       FileInfo fileInfo,
