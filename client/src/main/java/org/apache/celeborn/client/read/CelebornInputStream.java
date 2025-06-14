@@ -192,7 +192,8 @@ public abstract class CelebornInputStream extends InputStream {
     private boolean fetchExcludeWorkerOnFailureEnabled;
     private boolean shuffleCompressionEnabled;
     private long fetchExcludedWorkerExpireTimeout;
-    private int testMockGetReplicaChunkBlock;
+    private boolean testMockGetReplicaChunkBlock;
+    private int testMockGetReplicaChunkBlockMode;
     private ConcurrentHashMap<String, Long> fetchExcludedWorkers;
 
     private boolean containLocalRead = false;
@@ -229,7 +230,8 @@ public abstract class CelebornInputStream extends InputStream {
       this.clientFactory = clientFactory;
       this.shuffleKey = shuffleKey;
       this.testMockGetReplicaChunkBlock = conf.testMockGetReplicaChunkBlock();
-      this.locations = reorderLocations(locations, testMockGetReplicaChunkBlock);
+      this.testMockGetReplicaChunkBlockMode = conf.testMockGetReplicaChunkBlockMode();
+      this.locations = reorderLocations(locations, testMockGetReplicaChunkBlock, testMockGetReplicaChunkBlockMode);
       this.attempts = attempts;
       this.attemptNumber = attemptNumber;
       this.startMapIndex = startMapIndex;
@@ -263,13 +265,13 @@ public abstract class CelebornInputStream extends InputStream {
       moveToNextReader(false);
     }
 
-    private PartitionLocation[] reorderLocations(PartitionLocation[] locations, int testMockGetReplicaChunkBlock) {
-      if (testMockGetReplicaChunkBlock == 0) {
+    private PartitionLocation[] reorderLocations(PartitionLocation[] locations, boolean testMockGetReplicaChunkBlock, int testMockGetReplicaChunkBlockMode) {
+      if (!testMockGetReplicaChunkBlock) {
         return (PartitionLocation[]) Utils.randomizeInPlace(locations, RAND);
-      } else if (testMockGetReplicaChunkBlock == 3 || testMockGetReplicaChunkBlock == 1) {
+      } else if (testMockGetReplicaChunkBlockMode == 3 || testMockGetReplicaChunkBlockMode == 1) {
         Arrays.sort(locations, Comparator.comparingInt(PartitionLocation::getEpoch));
         return locations;
-      } else if (testMockGetReplicaChunkBlock == 2) {
+      } else if (testMockGetReplicaChunkBlockMode == 2) {
         Arrays.sort(locations, Comparator.comparingInt(PartitionLocation::getEpoch).reversed());
         return locations;
       } else {
@@ -433,14 +435,14 @@ public abstract class CelebornInputStream extends InputStream {
             throw new CelebornIOException(
                 "Fetch data from excluded worker! " + currentReader.getLocation());
           }
-          if (testMockGetReplicaChunkBlock != 0 && startMapIndex == 1
+          if (testMockGetReplicaChunkBlock && startMapIndex == 1
                   && (currentReader.getLocation().getFileName().equals("3-0-0"))
                   && currentReader.getLocation().hasPeer()) {
-            if (testMockGetReplicaChunkBlock != 3 || !firstChunk) {
+            if (testMockGetReplicaChunkBlockMode != 3 || !firstChunk) {
               PartitionLocation location = currentReader.getLocation();
               logger.error("{} has peer {}, isFirstChunk: {}, mapId={}, mockMode:{}, retryCnt/maxRetry:{}/{}",
                       location.getFileName(), location.hasPeer(), firstChunk,
-                      startMapIndex, testMockGetReplicaChunkBlock, fetchChunkRetryCnt, fetchChunkMaxRetry);
+                      startMapIndex, testMockGetReplicaChunkBlockMode, fetchChunkRetryCnt, fetchChunkMaxRetry);
               throw new CelebornIOException("mock get chunk from replica location");
             }
           }
@@ -448,7 +450,7 @@ public abstract class CelebornInputStream extends InputStream {
             PartitionLocation location = currentReader.getLocation();
             logger.warn("{} does not have next, isFirstChunk: {}, mapId={}～{}, mockMode:{}, retryCnt/maxRetry:{}/{}",
                     location.getFileName(), firstChunk, startMapIndex, endMapIndex,
-                    testMockGetReplicaChunkBlock, fetchChunkRetryCnt, fetchChunkMaxRetry);
+                    testMockGetReplicaChunkBlockMode, fetchChunkRetryCnt, fetchChunkMaxRetry);
             return null;
           }
           return currentReader.next();

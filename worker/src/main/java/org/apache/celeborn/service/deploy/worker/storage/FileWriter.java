@@ -88,7 +88,7 @@ public abstract class FileWriter implements DeviceObserver {
   private String shuffleKey;
   private StorageManager storageManager;
   private boolean workerGracefulShutdown;
-  private final int testMockGetReplicaChunkBlock;
+  private final boolean testMockGetReplicaChunkBlock;
 
   public FileWriter(
       FileInfo fileInfo,
@@ -194,13 +194,13 @@ public abstract class FileWriter implements DeviceObserver {
     }
 
     int mapId = 0;
-    if (rangeReadFilter || testMockGetReplicaChunkBlock != 0) {
+    if (rangeReadFilter || testMockGetReplicaChunkBlock) {
       byte[] header = new byte[4];
       data.markReaderIndex();
       data.readBytes(header);
       data.resetReaderIndex();
       mapId = Platform.getInt(header, Platform.BYTE_ARRAY_OFFSET);
-      if (testMockGetReplicaChunkBlock !=0 && mapId == 1) {
+      if (testMockGetReplicaChunkBlock && mapId == 1) {
         String fileName = fileInfo.getFilePath().split("/")[fileInfo.getFilePath().split("/").length-1];
         if (Objects.equals(fileName, "3-0-1")) {
           throw new CelebornIOException("mock skewed replica location write failure");

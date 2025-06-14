@@ -39,7 +39,7 @@ class CelebornInputStreamSuite extends AnyFunSuite
     logInfo("test initialized , setup Celeborn mini cluster")
     val workerConf = Map(
       "celeborn.shuffle.chunk.size" -> "1k",
-      "celeborn.test.mockGetReplicaChunkBlock" -> "1")
+      "celeborn.test.mockGetReplicaChunkBlock" -> "true")
     setUpMiniCluster(workerConf=workerConf, workerNum = 5)
   }
 
@@ -91,7 +91,8 @@ class CelebornInputStreamSuite extends AnyFunSuite
       .set(s"spark.${CelebornConf.SHUFFLE_RANGE_READ_FILTER_ENABLED.key}", "true")
       .set(s"spark.${CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key}", "true")
       .set("spark.sql.adaptive.coalescePartitions.initialPartitionNum", "8")
-      .set("spark.celeborn.test.mockGetReplicaChunkBlock", mockGetReplicaChunkBlock.toString)
+      .set("spark.celeborn.test.mockGetReplicaChunkBlock", "true")
+      .set("spark.celeborn.test.mockGetReplicaChunkBlockMode", mockGetReplicaChunkBlock.toString)
       .set("spark.sql.shuffle.partitions", "8")
 
     enableCeleborn(sparkConf)
