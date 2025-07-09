@@ -101,7 +101,8 @@ class NettyRpcEnvSuite extends RpcEnvSuite with TimeLimits {
       "localhost",
       "localhost",
       0,
-      numUsableCores, null)
+      numUsableCores,
+      null)
     val anotherEnv = new NettyRpcEnvFactory().create(config)
     anotherEnv.setupEndpoint(
       "StackOverflowError",

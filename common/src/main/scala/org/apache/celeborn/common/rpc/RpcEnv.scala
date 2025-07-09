@@ -38,14 +38,14 @@ object RpcEnv {
       conf: CelebornConf): RpcEnv = {
     create(name, host, host, port, conf, 0)
   }
-  
+
   def create(
-              name: String,
-              bindAddress: String,
-              advertiseAddress: String,
-              port: Int,
-              conf: CelebornConf,
-              numUsableCores: Int): RpcEnv = {
+      name: String,
+      bindAddress: String,
+      advertiseAddress: String,
+      port: Int,
+      conf: CelebornConf,
+      numUsableCores: Int): RpcEnv = {
     create(name, bindAddress, advertiseAddress, port, conf, numUsableCores, null)
   }
 
@@ -57,7 +57,8 @@ object RpcEnv {
       conf: CelebornConf,
       numUsableCores: Int,
       source: AbstractSource): RpcEnv = {
-    val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, numUsableCores, source)
+    val config =
+      RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, numUsableCores, source)
     new NettyRpcEnvFactory().create(config)
   }
 }

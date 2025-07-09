@@ -24,12 +24,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
-import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.exception.CelebornIOException;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.util.JavaUtils;
 
 /*
@@ -113,7 +113,8 @@ public class InFlightRequestTracker {
         times--;
       }
     } catch (InterruptedException e) {
-      pushState.exception.set(new CelebornIOException(FailureType.PUSH_LIMIT_FAILED, e.getMessage(), e));
+      pushState.exception.set(
+          new CelebornIOException(FailureType.PUSH_LIMIT_FAILED, e.getMessage(), e));
     }
 
     if (times <= 0) {
@@ -153,7 +154,8 @@ public class InFlightRequestTracker {
         times--;
       }
     } catch (InterruptedException e) {
-      pushState.exception.set(new CelebornIOException(FailureType.PUSH_LIMIT_FAILED, e.getMessage(), e));
+      pushState.exception.set(
+          new CelebornIOException(FailureType.PUSH_LIMIT_FAILED, e.getMessage(), e));
     }
 
     if (times <= 0) {

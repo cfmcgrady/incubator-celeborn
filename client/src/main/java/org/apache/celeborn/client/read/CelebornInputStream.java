@@ -27,7 +27,6 @@ import java.util.concurrent.atomic.LongAdder;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import io.netty.buffer.ByteBuf;
-import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.commons.lang3.tuple.Pair;
 import org.roaringbitmap.RoaringBitmap;
 import org.slf4j.Logger;
@@ -42,6 +41,7 @@ import org.apache.celeborn.common.protocol.CompressionCodec;
 import org.apache.celeborn.common.protocol.PartitionLocation;
 import org.apache.celeborn.common.protocol.StorageInfo;
 import org.apache.celeborn.common.protocol.TransportModuleConstants;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.unsafe.Platform;
 import org.apache.celeborn.common.util.ExceptionMaker;
 import org.apache.celeborn.common.util.Utils;
@@ -711,7 +711,8 @@ public abstract class CelebornInputStream extends InputStream {
             e);
         IOException ioe = e;
         if (exceptionMaker != null) {
-          if (shuffleClient.reportShuffleFetchFailure(appShuffleId, shuffleId, FailureType.FETCH_FAILED)) {
+          if (shuffleClient.reportShuffleFetchFailure(
+              appShuffleId, shuffleId, FailureType.FETCH_FAILED)) {
             /*
              * [[ExceptionMaker.makeException]], for spark applications with celeborn.client.spark.fetch.throwsFetchFailure enabled will result in creating
              * a FetchFailedException; and that will make the TaskContext as failed with shuffle fetch issues - see SPARK-19276 for more.

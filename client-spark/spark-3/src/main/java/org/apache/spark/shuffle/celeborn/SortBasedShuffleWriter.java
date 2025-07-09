@@ -20,7 +20,6 @@ package org.apache.spark.shuffle.celeborn;
 import java.io.IOException;
 import java.util.concurrent.atomic.LongAdder;
 
-import org.apache.celeborn.common.protocol.message.FailureType;
 import scala.Option;
 import scala.Product2;
 import scala.reflect.ClassTag;
@@ -48,6 +47,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.celeborn.client.ShuffleClient;
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.exception.CelebornIOException;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.util.Utils;
 
 @Private
@@ -181,7 +181,7 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
       } else if (dep.mapSideCombine()) {
         if (dep.aggregator().isEmpty()) {
           throw new UnsupportedOperationException(
-                  "When using map side combine, an aggregator must be specified.");
+              "When using map side combine, an aggregator must be specified.");
         }
         write0(dep.aggregator().get().combineValuesByKey(records, taskContext));
       } else {
@@ -195,7 +195,6 @@ public class SortBasedShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
       }
       throw e;
     }
-
   }
 
   @VisibleForTesting

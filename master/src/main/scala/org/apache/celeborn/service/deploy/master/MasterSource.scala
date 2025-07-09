@@ -35,7 +35,9 @@ class MasterSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   private def addFailureTypeCounters(): Unit = {
     for (failureType <- FailureType.values) {
       if (failureType != FailureType.UNKNOWN) {
-        addCounter(APP_FAILED_COUNT, Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
+        addCounter(
+          APP_FAILED_COUNT,
+          Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
       }
     }
   }
@@ -52,10 +54,13 @@ class MasterSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   override def addTotalRpcCount(delta: Long): Unit = {
     incCounter(RPC_COUNT, delta)
   }
-  
+
   def incFailureAppCount(failureType: FailureType): Unit = {
     if (failureType != FailureType.UNKNOWN) {
-      incCounter(APP_FAILED_COUNT, 1, Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
+      incCounter(
+        APP_FAILED_COUNT,
+        1,
+        Map("stage" -> failureType.getCategory, "reason" -> failureType.getDisplay))
     }
   }
 }
@@ -84,6 +89,6 @@ object MasterSource {
   val RPC_COUNT = "RpcCount"
 
   val RPC_FAILED_COUNT = "RpcFailedCount"
-  
+
   val APP_FAILED_COUNT = "AppFailedCount"
 }

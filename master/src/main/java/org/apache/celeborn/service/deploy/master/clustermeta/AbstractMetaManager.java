@@ -29,9 +29,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
-import org.apache.celeborn.common.metrics.source.AbstractSource;
-import org.apache.celeborn.common.protocol.message.FailureType;
-import org.apache.celeborn.service.deploy.master.MasterSource;
 import scala.Option;
 
 import org.slf4j.Logger;
@@ -44,12 +41,15 @@ import org.apache.celeborn.common.meta.AppDiskUsageSnapShot;
 import org.apache.celeborn.common.meta.DiskInfo;
 import org.apache.celeborn.common.meta.DiskStatus;
 import org.apache.celeborn.common.meta.WorkerInfo;
+import org.apache.celeborn.common.metrics.source.AbstractSource;
 import org.apache.celeborn.common.protocol.PbSnapshotMetaInfo;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.quota.ResourceConsumption;
 import org.apache.celeborn.common.rpc.RpcEnv;
 import org.apache.celeborn.common.util.JavaUtils;
 import org.apache.celeborn.common.util.PbSerDeUtils;
 import org.apache.celeborn.common.util.Utils;
+import org.apache.celeborn.service.deploy.master.MasterSource;
 import org.apache.celeborn.service.deploy.master.network.CelebornRackResolver;
 
 public abstract class AbstractMetaManager implements IMetadataHandler {
@@ -373,11 +373,11 @@ public abstract class AbstractMetaManager implements IMetadataHandler {
                 !excludedWorkers.contains(worker) && !manuallyExcludedWorkers.contains(worker))
         .forEach(workerInfo -> workerInfo.updateDiskMaxSlots(estimatedPartitionSize));
   }
-  
+
   public void updateFailureCount(FailureType failureType, String appId) {
     LOG.debug("appId " + appId + " failure " + failureType.getDisplay());
     if (null != source) {
-      ((MasterSource)source).incFailureAppCount(failureType);
+      ((MasterSource) source).incFailureAppCount(failureType);
     }
   }
 }

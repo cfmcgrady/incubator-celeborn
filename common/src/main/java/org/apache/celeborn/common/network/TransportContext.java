@@ -93,7 +93,8 @@ public class TransportContext {
     this(conf, msgHandler, closeIdleConnections, null, false, null);
   }
 
-  public TransportContext(TransportConf conf, BaseMessageHandler msgHandler, AbstractSource source) {
+  public TransportContext(
+      TransportConf conf, BaseMessageHandler msgHandler, AbstractSource source) {
     this(conf, msgHandler, false, false, source);
   }
 

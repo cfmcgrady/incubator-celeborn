@@ -22,8 +22,8 @@ import java.util
 import java.util.concurrent.{ConcurrentHashMap, ThreadPoolExecutor}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicIntegerArray}
 
-import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.concurrent.{Await, Promise}
 import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success, Try}
@@ -586,7 +586,6 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
       }
       fileWriterIndex += 1
     }
-
 
     val hardSplitIndexes = pushMergedDataCallback.getHardSplitIndexes
     val writePromise = Promise[Array[StatusCode]]()
