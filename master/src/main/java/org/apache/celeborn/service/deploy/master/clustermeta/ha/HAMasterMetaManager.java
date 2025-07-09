@@ -21,8 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.apache.celeborn.common.metrics.source.AbstractSource;
-import org.apache.celeborn.common.protocol.message.FailureType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +31,8 @@ import org.apache.celeborn.common.identity.UserIdentifier;
 import org.apache.celeborn.common.meta.AppDiskUsageMetric;
 import org.apache.celeborn.common.meta.DiskInfo;
 import org.apache.celeborn.common.meta.WorkerInfo;
+import org.apache.celeborn.common.metrics.source.AbstractSource;
+import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.quota.ResourceConsumption;
 import org.apache.celeborn.common.rpc.RpcEnv;
 import org.apache.celeborn.service.deploy.master.clustermeta.AbstractMetaManager;
@@ -350,21 +350,18 @@ public class HAMasterMetaManager extends AbstractMetaManager {
   public void handleReportFailure(FailureType failureType, String appId) {
     try {
       ratisServer.submitRequest(
-              ResourceRequest.newBuilder()
-                      .setCmdType(Type.ReportFailure)
-                      .setRequestId(MasterClient.genRequestId())
-                      .setReportFailureRequest(
-                              ResourceProtos.ReportFailureRequest.newBuilder()
-                                      .setAppId(appId)
-                                      .setFailureType(failureType.getValue())
-                                      .build()
-                      )
-                      .build()
-      );
+          ResourceRequest.newBuilder()
+              .setCmdType(Type.ReportFailure)
+              .setRequestId(MasterClient.genRequestId())
+              .setReportFailureRequest(
+                  ResourceProtos.ReportFailureRequest.newBuilder()
+                      .setAppId(appId)
+                      .setFailureType(failureType.getValue())
+                      .build())
+              .build());
     } catch (CelebornRuntimeException e) {
       LOG.error("Handle report failure {} appId {} failed!", failureType, appId, e);
       throw e;
     }
-
   }
 }

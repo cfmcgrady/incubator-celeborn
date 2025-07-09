@@ -54,7 +54,7 @@ public class TransportConf {
   public int connectionTimeoutMs() {
     return celebornConf.networkIoConnectionTimeoutMs(module);
   }
-  
+
   public boolean workerCloseIdleConnections() {
     return celebornConf.workerCloseIdleConnections(module);
   }

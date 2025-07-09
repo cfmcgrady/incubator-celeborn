@@ -22,11 +22,14 @@ import java.net.BindException
 import java.util
 import java.util.concurrent.{ConcurrentHashMap, ScheduledFuture, TimeUnit}
 import java.util.function.ToLongFunction
+
 import scala.collection.JavaConverters._
 import scala.util.Random
+
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.ratis.proto.RaftProtos
 import org.apache.ratis.proto.RaftProtos.RaftPeerRole
+
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.identity.UserIdentifier
@@ -449,10 +452,13 @@ private[celeborn] class Master(
       val failureType = FailureType.fromValue(pb.getFailureType)
       val appId = pb.getAppId
       logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
-      executeWithLeaderChecker(context, handleReportFailure(context, failureType, appId)) 
+      executeWithLeaderChecker(context, handleReportFailure(context, failureType, appId))
   }
-  
-  private def handleReportFailure(context: RpcCallContext, failureType: FailureType, appId: String): Unit = {
+
+  private def handleReportFailure(
+      context: RpcCallContext,
+      failureType: FailureType,
+      appId: String): Unit = {
     statusSystem.handleReportFailure(failureType, appId)
     context.reply(PbReportFailureResponse.newBuilder().setSuccess(true).build())
   }

@@ -45,7 +45,7 @@ class WorkerSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   addCounter(ACTIVE_CONNECTION_COUNT)
 
   addCounter(SLOTS_ALLOCATED)
-  
+
   addCounter(RPC_COUNT)
   addCounter(RPC_FAILED_COUNT)
 
@@ -167,7 +167,7 @@ object WorkerSource {
   // active shuffle
   val ACTIVE_SHUFFLE_SIZE = "ActiveShuffleSize"
   val ACTIVE_SHUFFLE_FILE_COUNT = "ActiveShuffleFileCount"
-  
+
   // rpc
   val RPC_COUNT = "RpcCount"
 

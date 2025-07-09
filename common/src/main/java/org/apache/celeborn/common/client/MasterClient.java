@@ -123,13 +123,13 @@ public class MasterClient {
     // whether it can be sent successfully, so we adopt an asynchronous method. Therefore, we
     // choose to use one Thread pool to use synchronization.
     oneWayMessageSender.submit(
-            () -> {
-              try {
-                sendMessageInner(message, clz);
-              } catch (Throwable e) {
-                LOG.warn("Exception occurs while send one-way message.", e);
-              }
-            });
+        () -> {
+          try {
+            sendMessageInner(message, clz);
+          } catch (Throwable e) {
+            LOG.warn("Exception occurs while send one-way message.", e);
+          }
+        });
     LOG.debug("Send one-way message {}.", message);
   }
 

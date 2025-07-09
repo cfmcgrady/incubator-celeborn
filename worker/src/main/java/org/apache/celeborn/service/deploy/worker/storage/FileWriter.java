@@ -342,7 +342,8 @@ public abstract class FileWriter implements DeviceObserver {
     }
   }
 
-  protected void waitOnNoPending(AtomicInteger counter, boolean failWhenTimeout) throws IOException {
+  protected void waitOnNoPending(AtomicInteger counter, boolean failWhenTimeout)
+      throws IOException {
     long waitTime = writerCloseTimeoutMs;
     while (counter.get() > 0 && waitTime > 0) {
       try {

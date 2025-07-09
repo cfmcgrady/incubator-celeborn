@@ -23,14 +23,17 @@ import java.util.{function, List => JList}
 import java.util.concurrent.{Callable, ConcurrentHashMap, LinkedBlockingQueue, ScheduledFuture, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
+
 import scala.collection.JavaConverters._
 import scala.collection.generic.CanBuildFrom
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.Duration
 import scala.util.Random
+
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.cache.{Cache, CacheBuilder}
+
 import org.apache.celeborn.client.LifecycleManager.{ShuffleAllocatedWorkers, ShuffleFailedWorkers}
 import org.apache.celeborn.client.listener.WorkerStatusListener
 import org.apache.celeborn.common.CelebornConf
@@ -40,8 +43,8 @@ import org.apache.celeborn.common.internal.Logging
 import org.apache.celeborn.common.meta.{ShufflePartitionLocationInfo, WorkerInfo}
 import org.apache.celeborn.common.protocol._
 import org.apache.celeborn.common.protocol.RpcNameConstants.WORKER_EP
-import org.apache.celeborn.common.protocol.message.ControlMessages._
 import org.apache.celeborn.common.protocol.message.{FailureType, StatusCode}
+import org.apache.celeborn.common.protocol.message.ControlMessages._
 import org.apache.celeborn.common.rpc._
 import org.apache.celeborn.common.rpc.netty.{LocalNettyRpcCallContext, RemoteNettyRpcCallContext}
 import org.apache.celeborn.common.util.{JavaUtils, PbSerDeUtils, ThreadUtils, Utils}
@@ -859,21 +862,24 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
 
   private def reportFailureToMaster(failureType: FailureType): Boolean = {
     if (!reportedFailure.containsKey(failureType)) {
-      reportedFailure.computeIfAbsent(failureType, new util.function.Function[FailureType, Boolean]() {
-        override def apply(ft: FailureType): Boolean = {
-          masterClient.send[PbReportFailureResponse](
-            PbReportFailure.newBuilder().setAppId(appUniqueId).setFailureType(failureType.getValue).build(),
-            classOf[PbReportFailureResponse]
-          )
-          true
-        }
-      })
+      reportedFailure.computeIfAbsent(
+        failureType,
+        new util.function.Function[FailureType, Boolean]() {
+          override def apply(ft: FailureType): Boolean = {
+            masterClient.send[PbReportFailureResponse](
+              PbReportFailure.newBuilder().setAppId(appUniqueId).setFailureType(
+                failureType.getValue).build(),
+              classOf[PbReportFailureResponse])
+            true
+          }
+        })
     }
     reportedFailure.get(failureType)
   }
 
   private def handleReportFailure(context: RpcCallContext, failureType: FailureType): Unit = {
-    context.reply(PbReportFailureResponse.newBuilder().setSuccess(reportFailureToMaster(failureType)).build())
+    context.reply(
+      PbReportFailureResponse.newBuilder().setSuccess(reportFailureToMaster(failureType)).build())
   }
 
   private def handleStageEnd(shuffleId: Int): Unit = {

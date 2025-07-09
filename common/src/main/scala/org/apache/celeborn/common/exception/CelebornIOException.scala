@@ -18,6 +18,7 @@
 package org.apache.celeborn.common.exception
 
 import java.io.IOException
+
 import org.apache.celeborn.common.protocol.message.{FailureType, StatusCode}
 
 class CelebornIOException(message: String, cause: Throwable)
@@ -37,6 +38,6 @@ class CelebornIOException(message: String, cause: Throwable)
     this(message, cause)
     this.failureType = failureType
   }
-  
+
   def getFailureType: FailureType = failureType
 }

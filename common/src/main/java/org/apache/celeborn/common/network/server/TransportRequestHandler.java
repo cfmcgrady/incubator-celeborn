@@ -24,10 +24,10 @@ import java.nio.ByteBuffer;
 import com.google.common.base.Throwables;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import org.apache.celeborn.common.metrics.source.AbstractSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.celeborn.common.metrics.source.AbstractSource;
 import org.apache.celeborn.common.network.buffer.NioManagedBuffer;
 import org.apache.celeborn.common.network.client.RpcResponseCallback;
 import org.apache.celeborn.common.network.client.TransportClient;
@@ -52,11 +52,14 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
 
   /** Handles all RPC messages. */
   private final BaseMessageHandler msgHandler;
-  
+
   private final AbstractSource source;
 
   public TransportRequestHandler(
-          Channel channel, TransportClient reverseClient, BaseMessageHandler msgHandler, AbstractSource source) {
+      Channel channel,
+      TransportClient reverseClient,
+      BaseMessageHandler msgHandler,
+      AbstractSource source) {
     this.channel = channel;
     this.reverseClient = reverseClient;
     this.msgHandler = msgHandler;
