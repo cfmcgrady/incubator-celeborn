@@ -231,7 +231,9 @@ public abstract class CelebornInputStream extends InputStream {
       this.shuffleKey = shuffleKey;
       this.testMockGetReplicaChunkBlock = conf.testMockGetReplicaChunkBlock();
       this.testMockGetReplicaChunkBlockMode = conf.testMockGetReplicaChunkBlockMode();
-      this.locations = reorderLocations(locations, testMockGetReplicaChunkBlock, testMockGetReplicaChunkBlockMode);
+      this.locations =
+          reorderLocations(
+              locations, testMockGetReplicaChunkBlock, testMockGetReplicaChunkBlockMode);
       this.attempts = attempts;
       this.attemptNumber = attemptNumber;
       this.startMapIndex = startMapIndex;
@@ -265,7 +267,10 @@ public abstract class CelebornInputStream extends InputStream {
       moveToNextReader(false);
     }
 
-    private PartitionLocation[] reorderLocations(PartitionLocation[] locations, boolean testMockGetReplicaChunkBlock, int testMockGetReplicaChunkBlockMode) {
+    private PartitionLocation[] reorderLocations(
+        PartitionLocation[] locations,
+        boolean testMockGetReplicaChunkBlock,
+        int testMockGetReplicaChunkBlockMode) {
       if (!testMockGetReplicaChunkBlock) {
         return (PartitionLocation[]) Utils.randomizeInPlace(locations, RAND);
       } else if (testMockGetReplicaChunkBlockMode == 3 || testMockGetReplicaChunkBlockMode == 1) {
@@ -435,22 +440,35 @@ public abstract class CelebornInputStream extends InputStream {
             throw new CelebornIOException(
                 "Fetch data from excluded worker! " + currentReader.getLocation());
           }
-          if (testMockGetReplicaChunkBlock && startMapIndex == 1
-                  && (currentReader.getLocation().getFileName().equals("3-0-0"))
-                  && currentReader.getLocation().hasPeer()) {
+          if (testMockGetReplicaChunkBlock
+              && startMapIndex == 1
+              && (currentReader.getLocation().getFileName().equals("3-0-0"))
+              && currentReader.getLocation().hasPeer()) {
             if (testMockGetReplicaChunkBlockMode != 3 || !firstChunk) {
               PartitionLocation location = currentReader.getLocation();
-              logger.error("{} has peer {}, isFirstChunk: {}, mapId={}, mockMode:{}, retryCnt/maxRetry:{}/{}",
-                      location.getFileName(), location.hasPeer(), firstChunk,
-                      startMapIndex, testMockGetReplicaChunkBlockMode, fetchChunkRetryCnt, fetchChunkMaxRetry);
+              logger.error(
+                  "{} has peer {}, isFirstChunk: {}, mapId={}, mockMode:{}, retryCnt/maxRetry:{}/{}",
+                  location.getFileName(),
+                  location.hasPeer(),
+                  firstChunk,
+                  startMapIndex,
+                  testMockGetReplicaChunkBlockMode,
+                  fetchChunkRetryCnt,
+                  fetchChunkMaxRetry);
               throw new CelebornIOException("mock get chunk from replica location");
             }
           }
           if (!currentReader.hasNext()) {
             PartitionLocation location = currentReader.getLocation();
-            logger.warn("{} does not have next, isFirstChunk: {}, mapId={}～{}, mockMode:{}, retryCnt/maxRetry:{}/{}",
-                    location.getFileName(), firstChunk, startMapIndex, endMapIndex,
-                    testMockGetReplicaChunkBlockMode, fetchChunkRetryCnt, fetchChunkMaxRetry);
+            logger.warn(
+                "{} does not have next, isFirstChunk: {}, mapId={}～{}, mockMode:{}, retryCnt/maxRetry:{}/{}",
+                location.getFileName(),
+                firstChunk,
+                startMapIndex,
+                endMapIndex,
+                testMockGetReplicaChunkBlockMode,
+                fetchChunkRetryCnt,
+                fetchChunkMaxRetry);
             return null;
           }
           return currentReader.next();
@@ -670,7 +688,7 @@ public abstract class CelebornInputStream extends InputStream {
         if (firstChunk && currentReader != null) {
           init();
           currentChunk = getNextChunk();
-          while (currentChunk == null && moveToNextChunk());
+          while (currentChunk == null && moveToNextChunk()) ;
           firstChunk = false;
         }
         if (currentChunk == null) {

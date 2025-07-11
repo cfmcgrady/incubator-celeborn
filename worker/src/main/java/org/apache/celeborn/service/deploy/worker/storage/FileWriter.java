@@ -29,13 +29,13 @@ import javax.annotation.concurrent.GuardedBy;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
-import org.apache.celeborn.common.exception.CelebornIOException;
 import org.roaringbitmap.RoaringBitmap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.exception.AlreadyClosedException;
+import org.apache.celeborn.common.exception.CelebornIOException;
 import org.apache.celeborn.common.meta.DiskStatus;
 import org.apache.celeborn.common.meta.FileInfo;
 import org.apache.celeborn.common.metrics.source.AbstractSource;
@@ -201,7 +201,8 @@ public abstract class FileWriter implements DeviceObserver {
       data.resetReaderIndex();
       mapId = Platform.getInt(header, Platform.BYTE_ARRAY_OFFSET);
       if (testMockGetReplicaChunkBlock && mapId == 1) {
-        String fileName = fileInfo.getFilePath().split("/")[fileInfo.getFilePath().split("/").length-1];
+        String fileName =
+            fileInfo.getFilePath().split("/")[fileInfo.getFilePath().split("/").length - 1];
         if (Objects.equals(fileName, "3-0-1")) {
           throw new CelebornIOException("mock skewed replica location write failure");
         }
