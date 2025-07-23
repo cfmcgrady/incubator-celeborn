@@ -315,7 +315,7 @@ public abstract class CelebornInputStream extends InputStream {
       }
       currentReader = createReaderWithRetry(currentLocation);
       fileIndex++;
-      while (!currentReader.hasNext()) {
+      while (!currentReader.hasNext() || (fetchChunk && (currentChunk = getNextChunk()) == null)) {
         currentReader.close();
         currentReader = null;
         currentLocation = nextReadableLocation();
@@ -324,9 +324,6 @@ public abstract class CelebornInputStream extends InputStream {
         }
         currentReader = createReaderWithRetry(currentLocation);
         fileIndex++;
-      }
-      if (fetchChunk) {
-        currentChunk = getNextChunk();
       }
     }
 
@@ -419,6 +416,18 @@ public abstract class CelebornInputStream extends InputStream {
           if (isExcluded(currentReader.getLocation())) {
             throw new CelebornIOException(
                 "Fetch data from excluded worker! " + currentReader.getLocation());
+          }
+          if (!currentReader.hasNext()) {
+            PartitionLocation location = currentReader.getLocation();
+            logger.warn(
+                "{} does not have next, isFirstChunk: {}, mapId={}～{}, retryCnt/maxRetry:{}/{}",
+                location.getFileName(),
+                firstChunk,
+                startMapIndex,
+                endMapIndex,
+                fetchChunkRetryCnt,
+                fetchChunkMaxRetry);
+            return null;
           }
           return currentReader.next();
         } catch (Exception e) {
@@ -607,8 +616,7 @@ public abstract class CelebornInputStream extends InputStream {
         currentChunk.release();
       }
       currentChunk = null;
-      if (currentReader.hasNext()) {
-        currentChunk = getNextChunk();
+      if (currentReader.hasNext() && (currentChunk = getNextChunk()) != null) {
         return true;
       } else if (fileIndex < locations.length) {
         moveToNextReader(true);
@@ -638,6 +646,7 @@ public abstract class CelebornInputStream extends InputStream {
         if (firstChunk && currentReader != null) {
           init();
           currentChunk = getNextChunk();
+          while (currentChunk == null && moveToNextChunk()) ;
           firstChunk = false;
         }
         if (currentChunk == null) {
