@@ -47,32 +47,37 @@ class SplitTest extends AnyFunSuite with Logging with MiniClusterFeature
   }
 
   test("celeborn flink integration test - shuffle partition split test") {
-    val configuration = new Configuration
-    val parallelism = 8
-    configuration.setString(
-      "shuffle-service-factory.class",
-      "org.apache.celeborn.plugin.flink.RemoteShuffleServiceFactory")
-    configuration.setString(CelebornConf.MASTER_ENDPOINTS.key, "localhost:9097")
-    configuration.setString("execution.batch-shuffle-mode", "ALL_EXCHANGES_BLOCKING")
-    configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH)
-    configuration.setString("taskmanager.memory.network.min", "1024m")
-    configuration.setString(RestOptions.BIND_PORT, "8081-8089")
-    configuration.setString(
-      "execution.batch.adaptive.auto-parallelism.min-parallelism",
-      "" + parallelism)
-    configuration.setString(
-      "execution.batch.adaptive.auto-parallelism.max-parallelism",
-      "" + parallelism)
-    configuration.setString("restart-strategy.type", "fixed-delay")
-    configuration.setString("restart-strategy.fixed-delay.attempts", "50")
-    configuration.setString("restart-strategy.fixed-delay.delay", "5s")
-    configuration.setString(CelebornConf.SHUFFLE_PARTITION_SPLIT_THRESHOLD.key, "10k")
-    configuration.setString(CelebornConf.CLIENT_SHUFFLE_MAPPARTITION_SPLIT_ENABLED.key, "true")
-    val env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration)
-    env.getConfig.setExecutionMode(ExecutionMode.BATCH)
-    env.getConfig.setParallelism(parallelism)
-    SplitHelper.runSplitRead(env)
-    env.execute("split test")
+    val params = Array(true, false)
+    for (pi <- params.indices) {
+      val mockReserveFailure: Boolean = params(pi)
+      val configuration = new Configuration
+      val parallelism = 8
+      configuration.setString(
+        "shuffle-service-factory.class",
+        "org.apache.celeborn.plugin.flink.RemoteShuffleServiceFactory")
+      configuration.setString(CelebornConf.MASTER_ENDPOINTS.key, "localhost:9097")
+      configuration.setString(CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key, mockReserveFailure.toString)
+      configuration.setString("execution.batch-shuffle-mode", "ALL_EXCHANGES_BLOCKING")
+      configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH)
+      configuration.setString("taskmanager.memory.network.min", "1024m")
+      configuration.setString(RestOptions.BIND_PORT, "8081-8089")
+      configuration.setString(
+        "execution.batch.adaptive.auto-parallelism.min-parallelism",
+        "" + parallelism)
+      configuration.setString(
+        "execution.batch.adaptive.auto-parallelism.max-parallelism",
+        "" + parallelism)
+      configuration.setString("restart-strategy.type", "fixed-delay")
+      configuration.setString("restart-strategy.fixed-delay.attempts", "50")
+      configuration.setString("restart-strategy.fixed-delay.delay", "5s")
+      configuration.setString(CelebornConf.SHUFFLE_PARTITION_SPLIT_THRESHOLD.key, "10k")
+      configuration.setString(CelebornConf.CLIENT_SHUFFLE_MAPPARTITION_SPLIT_ENABLED.key, "true")
+      val env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration)
+      env.getConfig.setExecutionMode(ExecutionMode.BATCH)
+      env.getConfig.setParallelism(parallelism)
+      SplitHelper.runSplitRead(env)
+      env.execute("split test")
+    }
   }
 
 }
