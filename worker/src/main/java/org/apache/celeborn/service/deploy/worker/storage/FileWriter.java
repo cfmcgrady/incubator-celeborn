@@ -20,7 +20,6 @@ package org.apache.celeborn.service.deploy.worker.storage;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,7 +34,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.exception.AlreadyClosedException;
-import org.apache.celeborn.common.exception.CelebornIOException;
 import org.apache.celeborn.common.meta.DiskStatus;
 import org.apache.celeborn.common.meta.FileInfo;
 import org.apache.celeborn.common.metrics.source.AbstractSource;
@@ -88,7 +86,6 @@ public abstract class FileWriter implements DeviceObserver {
   private String shuffleKey;
   private StorageManager storageManager;
   private boolean workerGracefulShutdown;
-  private final boolean testMockGetReplicaChunkBlock;
 
   public FileWriter(
       FileInfo fileInfo,
@@ -111,7 +108,6 @@ public abstract class FileWriter implements DeviceObserver {
     this.splitMode = splitMode;
     this.partitionType = partitionType;
     this.rangeReadFilter = rangeReadFilter;
-    this.testMockGetReplicaChunkBlock = conf.testMockGetReplicaChunkBlock();
     if (!fileInfo.isHdfs()) {
       this.flusherBufferSize = conf.workerFlusherBufferSize();
       channel = FileChannelUtils.createWritableFileChannel(fileInfo.getFilePath());
@@ -194,19 +190,12 @@ public abstract class FileWriter implements DeviceObserver {
     }
 
     int mapId = 0;
-    if (rangeReadFilter || testMockGetReplicaChunkBlock) {
+    if (rangeReadFilter) {
       byte[] header = new byte[4];
       data.markReaderIndex();
       data.readBytes(header);
       data.resetReaderIndex();
       mapId = Platform.getInt(header, Platform.BYTE_ARRAY_OFFSET);
-      if (testMockGetReplicaChunkBlock && mapId == 1) {
-        String fileName =
-            fileInfo.getFilePath().split("/")[fileInfo.getFilePath().split("/").length - 1];
-        if (Objects.equals(fileName, "3-0-1")) {
-          throw new CelebornIOException("mock skewed replica location write failure");
-        }
-      }
     }
 
     final int numBytes = data.readableBytes();

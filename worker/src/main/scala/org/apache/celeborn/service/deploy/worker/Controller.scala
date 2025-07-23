@@ -64,7 +64,6 @@ private[deploy] class Controller(
   var shutdown: AtomicBoolean = _
   val defaultPushdataTimeout = conf.pushDataTimeoutMs
   val mockCommitFilesFailure = conf.testMockCommitFilesFailure
-  val testMockGetReplicaChunkBlock = conf.testMockGetReplicaChunkBlock
 
   def init(worker: Worker): Unit = {
     storageManager = worker.storageManager
@@ -318,9 +317,7 @@ private[deploy] class Controller(
                     storageInfo.setChunkOffsets(fileWriter.getFileInfo.getChunkOffsets)
                     committedStorageInfos.put(uniqueId, storageInfo)
                     if (fileWriter.getMapIdBitMap != null) {
-                      if (testMockGetReplicaChunkBlock || location.getMode == PartitionLocation.Mode.PRIMARY) {
-                        committedMapIdBitMap.put(uniqueId, fileWriter.getMapIdBitMap)
-                      }
+                      committedMapIdBitMap.put(uniqueId, fileWriter.getMapIdBitMap)
                     }
                     if (bytes >= minPartitionSizeToEstimate) {
                       partitionSizeList.add(bytes)
