@@ -44,11 +44,11 @@ class ChangePartitionManager(
     lifecycleManager: LifecycleManager) extends Logging {
 
   private val pushReplicateEnabled = conf.clientPushReplicateEnabled
-  // shuffleId -> (partitionId -> set of ChangePartition)
+  // shuffleId -> (partitionId-splitStart-splitEnd -> set of ChangePartition)
   private val changePartitionRequests =
-    JavaUtils.newConcurrentHashMap[Int, ConcurrentHashMap[Integer, JSet[ChangePartitionRequest]]]()
-  // shuffleId -> set of partition id
-  private val inBatchPartitions = JavaUtils.newConcurrentHashMap[Int, JSet[Integer]]()
+    JavaUtils.newConcurrentHashMap[Int, ConcurrentHashMap[String, JSet[ChangePartitionRequest]]]()
+  // shuffleId -> set of partitionId-splitStart-splitEnd
+  private val inBatchPartitions = JavaUtils.newConcurrentHashMap[Int, JSet[String]]()
 
   private val batchHandleChangePartitionEnabled = conf.batchHandleChangePartitionEnabled
   private val batchHandleChangePartitionExecutors = ThreadUtils.newDaemonCachedThreadPool(
@@ -81,10 +81,10 @@ class ChangePartitionManager(
                     override def run(): Unit = {
                       val distinctPartitions = requests.synchronized {
                         // For each partition only need handle one request
-                        requests.asScala.filter { case (partitionId, _) =>
-                          !inBatchPartitions.get(shuffleId).contains(partitionId)
-                        }.map { case (partitionId, request) =>
-                          inBatchPartitions.get(shuffleId).add(partitionId)
+                        requests.asScala.filter { case (partitionSplitRange, _) =>
+                          !inBatchPartitions.get(shuffleId).contains(partitionSplitRange)
+                        }.map { case (partitionSplitRange, request) =>
+                          inBatchPartitions.get(shuffleId).add(partitionSplitRange)
                           request.asScala.toArray.maxBy(_.epoch)
                         }.toArray
                       }
@@ -118,13 +118,13 @@ class ChangePartitionManager(
   private val rpcContextRegisterFunc =
     new util.function.Function[
       Int,
-      ConcurrentHashMap[Integer, util.Set[ChangePartitionRequest]]]() {
-      override def apply(s: Int): ConcurrentHashMap[Integer, util.Set[ChangePartitionRequest]] =
+      ConcurrentHashMap[String, util.Set[ChangePartitionRequest]]]() {
+      override def apply(s: Int): ConcurrentHashMap[String, util.Set[ChangePartitionRequest]] =
         JavaUtils.newConcurrentHashMap()
     }
 
-  private val inBatchShuffleIdRegisterFunc = new util.function.Function[Int, util.Set[Integer]]() {
-    override def apply(s: Int): util.Set[Integer] = new util.HashSet[Integer]()
+  private val inBatchShuffleIdRegisterFunc = new util.function.Function[Int, util.Set[String]]() {
+    override def apply(s: Int): util.Set[String] = new util.HashSet[String]()
   }
 
   def handleRequestPartitionLocation(
@@ -151,28 +151,32 @@ class ChangePartitionManager(
       oldPartition,
       cause)
 
+    val partitionSplitRange =
+      if (oldPartition != null) oldPartition.getSplitRange else String.valueOf(partitionId)
+
     requests.synchronized {
-      if (requests.containsKey(partitionId)) {
-        requests.get(partitionId).add(changePartition)
+      if (requests.containsKey(partitionSplitRange)) {
+        requests.get(partitionSplitRange).add(changePartition)
         logTrace(s"[handleRequestPartitionLocation] For $shuffleId, request for same partition" +
-          s"$partitionId-$oldEpoch exists, register context.")
+          s"$partitionSplitRange-$oldEpoch exists, register context.")
         return
       } else {
         // If new slot for the partition has been allocated, reply and return.
         // Else register and allocate for it.
-        getLatestPartition(shuffleId, partitionId, oldEpoch).foreach { latestLoc =>
+        getLatestPartition(shuffleId, oldPartition, partitionId, oldEpoch).foreach { latestLoc =>
           context.reply(
             partitionId,
             StatusCode.SUCCESS,
             Some(latestLoc),
             lifecycleManager.workerStatusTracker.workerAvailable(oldPartition))
-          logDebug(s"New partition found, old partition $partitionId-$oldEpoch return it." +
-            s" shuffleId: $shuffleId $latestLoc")
+          logDebug(
+            s"New partition found, old partition ${partitionSplitRange}-$oldEpoch return it." +
+              s" shuffleId: $shuffleId ${latestLoc.getSplitRange}-${latestLoc.getEpoch}")
           return
         }
         val set = new util.HashSet[ChangePartitionRequest]()
         set.add(changePartition)
-        requests.put(partitionId, set)
+        requests.put(partitionSplitRange, set)
       }
     }
     if (!batchHandleChangePartitionEnabled) {
@@ -182,13 +186,17 @@ class ChangePartitionManager(
 
   private def getLatestPartition(
       shuffleId: Int,
+      oldPartition: PartitionLocation,
       partitionId: Int,
       epoch: Int): Option[PartitionLocation] = {
     val map = lifecycleManager.latestPartitionLocation.get(shuffleId)
     if (map != null) {
-      val loc = map.get(partitionId)
-      if (loc != null && loc.getEpoch > epoch) {
-        return Some(loc)
+      val locationManager = map.get(partitionId)
+      if (locationManager != null) {
+        val loc = locationManager.getLatestPartitionLocation(oldPartition)
+        if (loc != null && loc.getEpoch > epoch) {
+          return Some(loc)
+        }
       }
     }
     None
@@ -200,9 +208,9 @@ class ChangePartitionManager(
     val requestsMap = changePartitionRequests.get(shuffleId)
 
     val changes = changePartitions.map { change =>
-      s"${change.shuffleId}-${change.partitionId}-${change.epoch}"
+      s"${change.shuffleId}-${change.partitionId}-${change.epoch}-${change.oldPartition}"
     }.mkString("[", ",", "]")
-    logWarning(s"Batch handle change partition for $changes")
+    logDebug(s"Batch handle change partition for $changes")
 
     // Exclude all failed workers
     if (changePartitions.exists(_.causes.isDefined) && !testRetryRevive) {
@@ -218,19 +226,26 @@ class ChangePartitionManager(
     def replySuccess(locations: Array[PartitionLocation]): Unit = {
       requestsMap.synchronized {
         locations.map { location =>
+          // location.getParent will be null when partitionType is MAP
+          val partitionSplitRange =
+            if (location.getParent != null) location.getParent.getSplitRange
+            else String.valueOf(location.getId)
           if (batchHandleChangePartitionEnabled) {
-            inBatchPartitions.get(shuffleId).remove(location.getId)
+            inBatchPartitions.get(shuffleId).remove(partitionSplitRange)
           }
           // Here one partition id can be remove more than once,
           // so need to filter null result before reply.
-          location -> Option(requestsMap.remove(location.getId))
+          location -> Option(requestsMap.remove(partitionSplitRange))
         }
       }.foreach { case (newLocation, requests) =>
         requests.map(_.asScala.toList.foreach(req =>
           req.context.reply(
             req.partitionId,
             StatusCode.SUCCESS,
-            Option(newLocation),
+            if (newLocation.getParent != null)
+              Option(lifecycleManager.latestPartitionLocation.get(shuffleId)
+                .get(req.partitionId).getRandomChild(newLocation.getParent))
+            else Option(newLocation),
             lifecycleManager.workerStatusTracker.workerAvailable(req.oldPartition))))
       }
     }
@@ -239,10 +254,14 @@ class ChangePartitionManager(
     def replyFailure(status: StatusCode): Unit = {
       requestsMap.synchronized {
         changePartitions.map { changePartition =>
+          // changePartition.oldPartition will be null when partitionType is MAP
+          val partitionSplitRange =
+            if (changePartition.oldPartition != null) changePartition.oldPartition.getSplitRange
+            else String.valueOf(changePartition.partitionId)
           if (batchHandleChangePartitionEnabled) {
-            inBatchPartitions.get(shuffleId).remove(changePartition.partitionId)
+            inBatchPartitions.get(shuffleId).remove(partitionSplitRange)
           }
-          Option(requestsMap.remove(changePartition.partitionId))
+          Option(requestsMap.remove(partitionSplitRange))
         }
       }.foreach { requests =>
         requests.map(_.asScala.toList.foreach(req =>
@@ -270,7 +289,10 @@ class ChangePartitionManager(
 
     // PartitionSplit all contains oldPartition
     val newlyAllocatedLocations =
-      reallocateChangePartitionRequestSlotsFromCandidates(changePartitions.toList, candidates)
+      reallocateChangePartitionRequestSlotsFromCandidates(
+        shuffleId,
+        changePartitions.toList,
+        candidates)
 
     if (!lifecycleManager.reserveSlotsWithRetry(
         shuffleId,
@@ -289,7 +311,6 @@ class ChangePartitionManager(
             .get(workInfo)
             .foreach { partitionLocationInfo =>
               partitionLocationInfo.addPrimaryPartitions(primaryLocations)
-              lifecycleManager.updateLatestPartitionLocations(shuffleId, primaryLocations)
               partitionLocationInfo.addReplicaPartitions(replicaLocations)
             }
           // partition location can be null when call reserveSlotsWithRetry().
@@ -297,9 +318,9 @@ class ChangePartitionManager(
             .distinct.filter(_ != null)
           if (locations.nonEmpty) {
             val changes = locations.map { partition =>
-              s"(partition ${partition.getId} epoch from ${partition.getEpoch - 1} to ${partition.getEpoch})"
+              s"(partition ${partition.getSplitRange} epoch from ${partition.getEpoch - 1} to ${partition.getEpoch})"
             }.mkString("[", ", ", "]")
-            logInfo(s"[Update partition] success for " +
+            logDebug(s"[Update partition] success for " +
               s"shuffle $shuffleId, succeed partitions: " +
               s"$changes.")
           }
@@ -309,15 +330,21 @@ class ChangePartitionManager(
   }
 
   private def reallocateChangePartitionRequestSlotsFromCandidates(
+      shuffleId: Int,
       changePartitionRequests: List[ChangePartitionRequest],
       candidates: List[WorkerInfo]): WorkerResource = {
     val slots = new WorkerResource()
     changePartitionRequests.foreach { partition =>
       lifecycleManager.allocateFromCandidates(
+        shuffleId,
         partition.partitionId,
+        partition.oldPartition,
         partition.epoch,
         candidates,
-        slots)
+        slots,
+        if (partition.oldPartition != null) partition.oldPartition.getSplitStart else -1,
+        if (partition.oldPartition != null) partition.oldPartition.getSplitEnd else -1,
+        conf.clientPartitionSplitNum)
     }
     slots
   }

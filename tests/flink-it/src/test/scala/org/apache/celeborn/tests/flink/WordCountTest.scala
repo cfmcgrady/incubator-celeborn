@@ -29,6 +29,7 @@ import org.apache.flink.streaming.api.graph.GlobalStreamExchangeMode
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funsuite.AnyFunSuite
 
+import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.internal.Logging
 import org.apache.celeborn.service.deploy.MiniClusterFeature
 import org.apache.celeborn.service.deploy.worker.Worker
@@ -52,35 +53,40 @@ class WordCountTest extends AnyFunSuite with Logging with MiniClusterFeature
   }
 
   test("celeborn flink integration test - word count") {
-    // set up execution environment
-    val configuration = new Configuration
-    val parallelism = 8
-    configuration.setString(
-      "shuffle-service-factory.class",
-      "org.apache.celeborn.plugin.flink.RemoteShuffleServiceFactory")
-    configuration.setString("celeborn.master.endpoints", "localhost:9097")
-    configuration.setString("execution.batch-shuffle-mode", "ALL_EXCHANGES_BLOCKING")
-    configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH)
-    configuration.setString("taskmanager.memory.network.min", "1024m")
-    configuration.setString(RestOptions.BIND_PORT, "8081-8089")
-    configuration.setString(
-      "execution.batch.adaptive.auto-parallelism.min-parallelism",
-      "" + parallelism)
-    configuration.setString("restart-strategy.type", "fixed-delay")
-    configuration.setString("restart-strategy.fixed-delay.attempts", "50")
-    configuration.setString("restart-strategy.fixed-delay.delay", "5s")
-    val env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration)
-    env.getConfig.setExecutionMode(ExecutionMode.BATCH)
-    env.getConfig.setParallelism(parallelism)
-    env.disableOperatorChaining()
-    // make parameters available in the web interface
-    WordCountHelper.execute(env, parallelism)
+    val params = Array(true, false)
+    for (pi <- params.indices) {
+      val mockReserveFailure: Boolean = params(pi)
+      // set up execution environment
+      val configuration = new Configuration
+      val parallelism = 8
+      configuration.setString(
+        "shuffle-service-factory.class",
+        "org.apache.celeborn.plugin.flink.RemoteShuffleServiceFactory")
+      configuration.setString("celeborn.master.endpoints", "localhost:9097")
+      configuration.setString(CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key, mockReserveFailure.toString)
+      configuration.setString("execution.batch-shuffle-mode", "ALL_EXCHANGES_BLOCKING")
+      configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH)
+      configuration.setString("taskmanager.memory.network.min", "1024m")
+      configuration.setString(RestOptions.BIND_PORT, "8081-8089")
+      configuration.setString(
+        "execution.batch.adaptive.auto-parallelism.min-parallelism",
+        "" + parallelism)
+      configuration.setString("restart-strategy.type", "fixed-delay")
+      configuration.setString("restart-strategy.fixed-delay.attempts", "50")
+      configuration.setString("restart-strategy.fixed-delay.delay", "5s")
+      val env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(configuration)
+      env.getConfig.setExecutionMode(ExecutionMode.BATCH)
+      env.getConfig.setParallelism(parallelism)
+      env.disableOperatorChaining()
+      // make parameters available in the web interface
+      WordCountHelper.execute(env, parallelism)
 
-    val graph = env.getStreamGraph
-    graph.setGlobalStreamExchangeMode(GlobalStreamExchangeMode.ALL_EDGES_BLOCKING)
-    graph.setJobType(JobType.BATCH)
-    env.execute(graph)
-    checkFlushingFileLength()
+      val graph = env.getStreamGraph
+      graph.setGlobalStreamExchangeMode(GlobalStreamExchangeMode.ALL_EDGES_BLOCKING)
+      graph.setJobType(JobType.BATCH)
+      env.execute(graph)
+      checkFlushingFileLength()
+    }
   }
 
   private def checkFlushingFileLength(): Unit = {

@@ -780,6 +780,8 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def clientExcludeReplicaOnFailureEnabled: Boolean =
     get(CLIENT_EXCLUDE_PEER_WORKER_ON_FAILURE_ENABLED)
   def clientMrMaxPushData: Long = get(CLIENT_MR_PUSH_DATA_MAX)
+  def clientPartitionSplitNum: Int = get(CLEINT_PATITION_SPLIT_NUM)
+  def clientMaxWriteParallelism: Int = get(CLEINT_PATITION_MAX_WRITE_PARALLELISM)
 
   // //////////////////////////////////////////////////////
   //               Shuffle Compression                   //
@@ -1119,6 +1121,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   // //////////////////////////////////////////////////////
   def testFetchFailure: Boolean = get(TEST_CLIENT_FETCH_FAILURE)
   def testMockDestroySlotsFailure: Boolean = get(TEST_CLIENT_MOCK_DESTROY_SLOTS_FAILURE)
+  def testMockReserveSlotsFailure: Boolean = get(TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE)
   def testMockCommitFilesFailure: Boolean = get(TEST_MOCK_COMMIT_FILES_FAILURE)
   def testPushPrimaryDataTimeout: Boolean = get(TEST_CLIENT_PUSH_PRIMARY_DATA_TIMEOUT)
   def testPushReplicaDataTimeout: Boolean = get(TEST_WORKER_PUSH_REPLICA_DATA_TIMEOUT)
@@ -2273,6 +2276,23 @@ object CelebornConf extends Logging {
       .bytesConf(ByteUnit.BYTE)
       .createWithDefaultString("8m")
 
+  val CLEINT_PATITION_SPLIT_NUM: ConfigEntry[Int] =
+    buildConf("celeborn.client.split.num")
+      .categories("worker")
+      .version("0.4.1")
+      .doc("The num for LifecycleManager to split partition at one time.")
+      .intConf
+      .createWithDefault(2)
+
+  val CLEINT_PATITION_MAX_WRITE_PARALLELISM: ConfigEntry[Int] =
+    buildConf("celeborn.client.max.write.parallelism")
+      .categories("worker")
+      .version("0.4.1")
+      .doc("Maximum write concurrency per partition. Default value is zero, which means max write parallelism is the total number of map tasks.")
+      .intConf
+      .checkValue(v => v >= 0, "Value must be no less than 0.")
+      .createWithDefault(0)
+
   val WORKER_PARTITION_SPLIT_ENABLED: ConfigEntry[Boolean] =
     buildConf("celeborn.worker.shuffle.partitionSplit.enabled")
       .withAlternative("celeborn.worker.partition.split.enabled")
@@ -3248,6 +3268,15 @@ object CelebornConf extends Logging {
       .categories("test", "client")
       .doc("Fail destroy slots request for test")
       .version("0.3.2")
+      .booleanConf
+      .createWithDefault(false)
+
+  val TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE: ConfigEntry[Boolean] =
+    buildConf("celeborn.test.client.mockReserveSlotsFailure")
+      .internal
+      .categories("test", "client")
+      .doc("Fail reserve slots request for test")
+      .version("0.4.0")
       .booleanConf
       .createWithDefault(false)
 

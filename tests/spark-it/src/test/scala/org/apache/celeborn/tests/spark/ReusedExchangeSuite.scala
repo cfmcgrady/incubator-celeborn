@@ -43,45 +43,50 @@ class ReusedExchangeSuite extends AnyFunSuite
   }
 
   def testReusedExchange(readLocalShuffle: Boolean): Unit = {
-    val sparkConf = new SparkConf().setAppName("celeborn-test").setMaster("local[2]")
-      .set("spark.shuffle.manager", "org.apache.spark.shuffle.celeborn.SparkShuffleManager")
-      .set(s"spark.${CelebornConf.MASTER_ENDPOINTS.key}", masterInfo._1.rpcEnv.address.toString)
-      .set(s"spark.${CelebornConf.READ_LOCAL_SHUFFLE_FILE.key}", readLocalShuffle.toString)
-      .set("spark.sql.autoBroadcastJoinThreshold", "-1")
-      .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "100")
-      .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "100")
-    //    spark.sql("set spark.sql.adaptive.localShuffleReader.enabled=false")
-    val spark = SparkSession.builder()
-      .config(sparkConf)
-      .getOrCreate()
-    spark.range(0, 1000, 1, 10)
-      .selectExpr("id as k1", "id as v1")
-      .createOrReplaceTempView("ta")
-    spark.range(0, 1000, 1, 10)
-      .selectExpr("id % 1 as k21", "id % 1 as k22", "id as v2")
-      .createOrReplaceTempView("tb")
-    spark.range(140)
-      .select(
-        col("id").cast("long").as("k3"),
-        concat(col("id").cast("string"), lit("a")).as("v3"))
-      .createOrReplaceTempView("tc")
+    val params = Array(true)
+    for (pi <- params.indices) {
+      val mockReserveFailure: Boolean = params(pi)
+      val sparkConf = new SparkConf().setAppName("celeborn-test").setMaster("local[2]")
+        .set("spark.shuffle.manager", "org.apache.spark.shuffle.celeborn.SparkShuffleManager")
+        .set(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+        .set(s"spark.${CelebornConf.MASTER_ENDPOINTS.key}", masterInfo._1.rpcEnv.address.toString)
+        .set(s"spark.${CelebornConf.READ_LOCAL_SHUFFLE_FILE.key}", readLocalShuffle.toString)
+        .set("spark.sql.autoBroadcastJoinThreshold", "-1")
+        .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "100")
+        .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "100")
+      //    spark.sql("set spark.sql.adaptive.localShuffleReader.enabled=false")
+      val spark = SparkSession.builder()
+        .config(sparkConf)
+        .getOrCreate()
+      spark.range(0, 1000, 1, 10)
+        .selectExpr("id as k1", "id as v1")
+        .createOrReplaceTempView("ta")
+      spark.range(0, 1000, 1, 10)
+        .selectExpr("id % 1 as k21", "id % 1 as k22", "id as v2")
+        .createOrReplaceTempView("tb")
+      spark.range(140)
+        .select(
+          col("id").cast("long").as("k3"),
+          concat(col("id").cast("string"), lit("a")).as("v3"))
+        .createOrReplaceTempView("tc")
 
-    spark.sql(
-      """
-        |SELECT *
-        |FROM ta
-        |LEFT JOIN tb ON ta.k1 = tb.k21
-        |LEFT JOIN tc ON tb.k22 = tc.k3
-        |""".stripMargin)
-      .createOrReplaceTempView("v1")
+      spark.sql(
+          """
+            |SELECT *
+            |FROM ta
+            |LEFT JOIN tb ON ta.k1 = tb.k21
+            |LEFT JOIN tc ON tb.k22 = tc.k3
+            |""".stripMargin)
+        .createOrReplaceTempView("v1")
 
-    spark.sql(
-      """
-        |SELECT * FROM v1 WHERE v3 IS NOT NULL
-        |UNION
-        |SELECT * FROM v1
-        |""".stripMargin)
-      .collect()
-    spark.stop
+      spark.sql(
+          """
+            |SELECT * FROM v1 WHERE v3 IS NOT NULL
+            |UNION
+            |SELECT * FROM v1
+            |""".stripMargin)
+        .collect()
+      spark.stop
+    }
   }
 }

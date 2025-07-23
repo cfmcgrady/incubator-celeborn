@@ -33,6 +33,7 @@ import scala.util.Random
 
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.cache.{Cache, CacheBuilder}
+import org.roaringbitmap.RoaringBitmap
 
 import org.apache.celeborn.client.LifecycleManager.{ShuffleAllocatedWorkers, ShuffleFailedWorkers}
 import org.apache.celeborn.client.listener.WorkerStatusListener
@@ -86,9 +87,9 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   val registeredShuffle = ConcurrentHashMap.newKeySet[Int]()
   // maintain each shuffle's map relation of WorkerInfo and partition location
   val shuffleAllocatedWorkers = new ShuffleAllocatedWorkers
-  // shuffle id -> (partitionId -> newest PartitionLocation)
+  // shuffle id -> (partitionId -> PartitionLocationManager)
   val latestPartitionLocation =
-    JavaUtils.newConcurrentHashMap[Int, ConcurrentHashMap[Int, PartitionLocation]]()
+    JavaUtils.newConcurrentHashMap[Int, ConcurrentHashMap[Int, PartitionLocationManager]]()
   private val userIdentifier: UserIdentifier = IdentityProvider.instantiate(conf).provide()
   private val availableStorageTypes = conf.availableStorageTypes
   // app shuffle id -> LinkedHashMap of (app shuffle identifier, (shuffle id, fetch status))
@@ -113,6 +114,13 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     .build().asInstanceOf[Cache[Int, ByteBuffer]]
 
   private val mockDestroyFailure = conf.testMockDestroySlotsFailure
+  private val mockReserveFailure = conf.testMockReserveSlotsFailure
+  private var reserveFailureMocked = false
+
+  @VisibleForTesting
+  def setReserveFailureMocked(mocked: Boolean): Unit = {
+    reserveFailureMocked = mocked
+  }
 
   @VisibleForTesting
   def workerSnapshots(shuffleId: Int): util.Map[WorkerInfo, ShufflePartitionLocationInfo] =
@@ -122,18 +130,30 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   def getUnregisterShuffleTime(): ConcurrentHashMap[Int, Long] =
     unregisterShuffleTime
 
-  val newMapFunc: function.Function[Int, ConcurrentHashMap[Int, PartitionLocation]] =
-    new util.function.Function[Int, ConcurrentHashMap[Int, PartitionLocation]]() {
-      override def apply(s: Int): ConcurrentHashMap[Int, PartitionLocation] = {
-        JavaUtils.newConcurrentHashMap[Int, PartitionLocation]()
+  val newMapFunc: function.Function[Int, ConcurrentHashMap[Int, PartitionLocationManager]] =
+    new util.function.Function[Int, ConcurrentHashMap[Int, PartitionLocationManager]]() {
+      override def apply(s: Int): ConcurrentHashMap[Int, PartitionLocationManager] = {
+        JavaUtils.newConcurrentHashMap[Int, PartitionLocationManager]()
       }
     }
 
-  def updateLatestPartitionLocations(
+  val newLeafPartitionFunc: function.Function[Int, PartitionLocationManager] =
+    new util.function.Function[Int, PartitionLocationManager]() {
+      override def apply(s: Int): PartitionLocationManager = {
+        new PartitionLocationManager
+      }
+    }
+
+  def initLatestPartitionLocation(
       shuffleId: Int,
       locations: util.List[PartitionLocation]): Unit = {
     val map = latestPartitionLocation.computeIfAbsent(shuffleId, newMapFunc)
-    locations.asScala.foreach(location => map.put(location.getId, location))
+    val primaryIter = locations.iterator()
+    while (primaryIter.hasNext) {
+      val loc = primaryIter.next()
+      val partitionLocationManager = map.computeIfAbsent(loc.getId, newLeafPartitionFunc)
+      partitionLocationManager.initLocs(loc)
+    }
   }
 
   case class RegisterCallContext(context: RpcCallContext, partitionId: Int = -1) {
@@ -600,6 +620,23 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
 
     // Third, for each slot, LifecycleManager should ask Worker to reserve the slot
     // and prepare the pushing data env.
+    var maxWriteParallelism = conf.clientMaxWriteParallelism
+    if (maxWriteParallelism == 0) {
+      maxWriteParallelism = numMappers
+    }
+    maxWriteParallelism = Math.min(maxWriteParallelism, numMappers)
+    slots.asScala.foreach { case (workerInfo, (primaryLocations, replicaLocations)) =>
+      if (primaryLocations != null) {
+        primaryLocations.forEach { loc: PartitionLocation =>
+          loc.setSplitRange(0, maxWriteParallelism - 1)
+        }
+      }
+      if (replicaLocations != null) {
+        replicaLocations.forEach { loc: PartitionLocation =>
+          loc.setSplitRange(0, maxWriteParallelism - 1)
+        }
+      }
+    }
     val reserveSlotsSuccess =
       reserveSlotsWithRetry(
         shuffleId,
@@ -621,7 +658,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       slots.asScala.foreach { case (workerInfo, (primaryLocations, replicaLocations)) =>
         val partitionLocationInfo = new ShufflePartitionLocationInfo()
         partitionLocationInfo.addPrimaryPartitions(primaryLocations)
-        updateLatestPartitionLocations(shuffleId, primaryLocations)
+        initLatestPartitionLocation(shuffleId, primaryLocations)
         partitionLocationInfo.addReplicaPartitions(replicaLocations)
         allocatedWorkers.put(workerInfo, partitionLocationInfo)
       }
@@ -1025,7 +1062,14 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       val iter = futures.iterator()
       while (iter.hasNext) {
         val (future, workerInfo) = iter.next()
-        if (future.isCompleted) {
+        if (mockReserveFailure && !reserveFailureMocked) {
+          reserveSlotFailedWorkers.put(
+            workerInfo,
+            (StatusCode.REQUEST_FAILED, System.currentTimeMillis()))
+          logError(s"mock reserve slots failure for worker ${workerInfo.readableAddress()}")
+          reserveFailureMocked = true
+          iter.remove()
+        } else if (future.isCompleted) {
           future.value.get match {
             case scala.util.Success(res) =>
               if (res.status.equals(StatusCode.SUCCESS)) {
@@ -1138,6 +1182,11 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
           partition.getMode match {
             case PartitionLocation.Mode.PRIMARY =>
               primaryPartitionLocations.remove(partition)
+              if (latestPartitionLocation.get(shuffleId) != null && latestPartitionLocation.get(
+                  shuffleId).get(partition.getId) != null && partition.getParent != null) {
+                val locationManager = latestPartitionLocation.get(shuffleId).get(partition.getId)
+                locationManager.removeChild(partition.getParent, partition)
+              }
               destroyResource.computeIfAbsent(workerInfoWithRpcRef, newLocationFunc)
                 ._1.add(partition)
             case PartitionLocation.Mode.REPLICA =>
@@ -1218,7 +1267,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
         Thread.sleep(reserveSlotsRetryWait)
       }
       // reserve buffers
-      logInfo(s"Try reserve slots for $shuffleId for $retryTimes times.")
+      logDebug(s"Try reserve slots for $shuffleId for $retryTimes times.")
       val reserveFailedWorkers = reserveSlots(shuffleId, requestSlots)
       if (reserveFailedWorkers.isEmpty) {
         success = true
@@ -1254,6 +1303,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
             // and put the new allocated slots to the total slots, the re-allocated slots won't be
             // duplicated with existing partition locations.
             requestSlots = reallocateSlotsFromCandidates(
+              shuffleId,
               failedPartitionLocations.values.toList,
               retryCandidates.asScala.toList,
               updateEpoch)
@@ -1280,7 +1330,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       logWarning(s"Reserve buffers for $shuffleId still fail after retrying, clear buffers.")
       destroySlotsWithRetry(shuffleId, slots)
     } else {
-      logInfo(s"Reserve buffer success for shuffleId $shuffleId")
+      logDebug(s"Reserve buffer success for shuffleId $shuffleId")
     }
     success
   }
@@ -1299,63 +1349,125 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
    * @param slots      Current WorkerResource
    */
   def allocateFromCandidates(
+      shuffleId: Int,
       id: Int,
+      oldPartition: PartitionLocation,
       oldEpochId: Int,
       candidates: List[WorkerInfo],
       slots: WorkerResource,
-      updateEpoch: Boolean = true): Unit = {
-
+      splitStart: Int,
+      splitEnd: Int,
+      splitNum: Int,
+      updateEpoch: Boolean = true,
+      reserveSlotsFailed: Boolean = false): Unit = {
     def isOnSameRack(primaryIndex: Int, replicaIndex: Int): Boolean = {
       candidates(primaryIndex).networkLocation.equals(candidates(replicaIndex).networkLocation)
     }
-
-    val primaryIndex = Random.nextInt(candidates.size)
-    val primaryLocation = new PartitionLocation(
-      id,
-      if (updateEpoch) oldEpochId + 1 else oldEpochId,
-      candidates(primaryIndex).host,
-      candidates(primaryIndex).rpcPort,
-      candidates(primaryIndex).pushPort,
-      candidates(primaryIndex).fetchPort,
-      candidates(primaryIndex).replicatePort,
-      PartitionLocation.Mode.PRIMARY)
-
-    if (pushReplicateEnabled) {
-      var replicaIndex = (primaryIndex + 1) % candidates.size
-      while (pushRackAwareEnabled && isOnSameRack(primaryIndex, replicaIndex)
-        && replicaIndex != primaryIndex) {
-        replicaIndex = (replicaIndex + 1) % candidates.size
-      }
-      // If one turn no suitable peer, then just use the next worker.
-      if (replicaIndex == primaryIndex) {
-        replicaIndex = (primaryIndex + 1) % candidates.size
-      }
-      val replicaLocation = new PartitionLocation(
+    var splitInfos: java.util.List[SplitInfo] = null
+    // OldPartition being null means it's MAP partitionType.
+    val isMapPartitionType = oldPartition == null
+    // PartitionLocationManager being null means it's during registerShuffle.
+    val isRegisterShuffle = latestPartitionLocation.get(
+      shuffleId) == null || latestPartitionLocation.get(shuffleId).get(id) == null
+    // if reserveSlotsFailed is true, we should remove oldPartition by unlink oldPartition and oldPartition's parent
+    // because oldPartition bounds to no worker and is invalid.
+    val parentLocation =
+      if (reserveSlotsFailed) oldPartition.getParent
+      else oldPartition // todo map revive and reserve failed
+    if (isMapPartitionType || isRegisterShuffle) {
+      splitInfos = new util.ArrayList[SplitInfo]()
+      splitInfos.add(new SplitInfo(
         id,
         if (updateEpoch) oldEpochId + 1 else oldEpochId,
-        candidates(replicaIndex).host,
-        candidates(replicaIndex).rpcPort,
-        candidates(replicaIndex).pushPort,
-        candidates(replicaIndex).fetchPort,
-        candidates(replicaIndex).replicatePort,
-        PartitionLocation.Mode.REPLICA,
-        primaryLocation)
-      primaryLocation.setPeer(replicaLocation)
-      val primaryAndReplicaPairs = slots.computeIfAbsent(candidates(replicaIndex), newLocationFunc)
-      primaryAndReplicaPairs._2.add(replicaLocation)
+        splitStart,
+        splitEnd))
+    } else { // revive for REDUCE partitionType
+      val partitionLocationManager = latestPartitionLocation.get(shuffleId).get(id)
+      splitInfos = partitionLocationManager.split(splitNum, oldPartition, updateEpoch)
     }
-
-    val primaryAndReplicaPairs = slots.computeIfAbsent(candidates(primaryIndex), newLocationFunc)
-    primaryAndReplicaPairs._1.add(primaryLocation)
+    val children = new util.ArrayList[PartitionLocation]()
+    val iterator = splitInfos.iterator()
+    while (iterator.hasNext) {
+      val splitInfo = iterator.next()
+      val primaryIndex = Random.nextInt(candidates.size)
+      val primaryLocation = new PartitionLocation(
+        splitInfo.getPartitionId,
+        splitInfo.getEpoch,
+        candidates(primaryIndex).host,
+        candidates(primaryIndex).rpcPort,
+        candidates(primaryIndex).pushPort,
+        candidates(primaryIndex).fetchPort,
+        candidates(primaryIndex).replicatePort,
+        PartitionLocation.Mode.PRIMARY,
+        null,
+        new StorageInfo,
+        new RoaringBitmap,
+        splitInfo.getSplitStart,
+        splitInfo.getSplitEnd)
+      children.add(primaryLocation)
+      primaryLocation.setParent(parentLocation)
+      if (pushReplicateEnabled) {
+        var replicaIndex = (primaryIndex + 1) % candidates.size
+        while (pushRackAwareEnabled && isOnSameRack(primaryIndex, replicaIndex)
+          && replicaIndex != primaryIndex) {
+          replicaIndex = (replicaIndex + 1) % candidates.size
+        }
+        // If one turn no suitable peer, then just use the next worker.
+        if (replicaIndex == primaryIndex) {
+          replicaIndex = (primaryIndex + 1) % candidates.size
+        }
+        val replicaLocation = new PartitionLocation(
+          splitInfo.getPartitionId,
+          splitInfo.getEpoch,
+          candidates(replicaIndex).host,
+          candidates(replicaIndex).rpcPort,
+          candidates(replicaIndex).pushPort,
+          candidates(replicaIndex).fetchPort,
+          candidates(replicaIndex).replicatePort,
+          PartitionLocation.Mode.REPLICA,
+          primaryLocation,
+          new StorageInfo,
+          new RoaringBitmap,
+          splitInfo.getSplitStart,
+          splitInfo.getSplitEnd)
+        primaryLocation.setPeer(replicaLocation)
+        replicaLocation.setParent(parentLocation)
+        val primaryAndReplicaPairs =
+          slots.computeIfAbsent(candidates(replicaIndex), newLocationFunc)
+        primaryAndReplicaPairs._2.add(replicaLocation)
+      }
+      val primaryAndReplicaPairs = slots.computeIfAbsent(candidates(primaryIndex), newLocationFunc)
+      primaryAndReplicaPairs._1.add(primaryLocation)
+    }
+    if (parentLocation != null) { // during revive of REDUCE partitionType
+      val partitionLocationManager = latestPartitionLocation.get(shuffleId).get(id)
+      if (reserveSlotsFailed) {
+        partitionLocationManager.addChildren(parentLocation, children)
+      } else {
+        partitionLocationManager.setChildren(parentLocation, children)
+      }
+    }
   }
 
   private def reallocateSlotsFromCandidates(
+      shuffleId: Int,
       oldPartitions: List[PartitionLocation],
       candidates: List[WorkerInfo],
       updateEpoch: Boolean = true): WorkerResource = {
     val slots = new WorkerResource()
     oldPartitions.foreach { partition =>
-      allocateFromCandidates(partition.getId, partition.getEpoch, candidates, slots, updateEpoch)
+      allocateFromCandidates(
+        shuffleId,
+        partition.getId,
+        partition,
+        partition.getEpoch,
+        candidates,
+        slots,
+        partition.getSplitStart,
+        partition.getSplitEnd,
+        1,
+        updateEpoch,
+        reserveSlotsFailed = true)
     }
     slots
   }
