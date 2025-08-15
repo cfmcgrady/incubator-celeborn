@@ -10,17 +10,26 @@ import scala.util.Random
 
 class FileChannelLargeFlushSuite extends CelebornFunSuite {
   val totalGB = 1
-  val minChunkSize = 1024      // 1K
+  val minChunkSize = 1         // 1B
   val maxChunkSize = 64 * 1024 // 64K
   val batchChunks = 64         // 一个批次的分片数
-  // 平均每个chunk约32K, 那一批大约2M, 1GB需批次数=1GB/2MB=~512
-  // 性能测试时，可适当调大batchChunks
+  val flushBatchSize = 256 * 1024  // 256K per flush batch
 
-  // 为了估算总数据量，统计每轮实际batch总字节数
+  def genRandomChunkSize(): Int = Random.nextInt(maxChunkSize - minChunkSize + 1) + minChunkSize
+  def allocFlushBatch(): (CompositeByteBuf, Int) = {
+    val buf = Unpooled.compositeBuffer()
+    var totalSize = 0
+    while (totalSize < flushBatchSize) {
+      val s = genRandomChunkSize()
+      buf.addComponent(true, Unpooled.directBuffer(s).writeZero(s))
+      totalSize += s
+    }
+    (buf, totalSize)
+  }
+
   def genChunkSizes(batchChunks: Int): Array[Int] =
     Array.fill(batchChunks)(Random.nextInt(maxChunkSize - minChunkSize + 1) + minChunkSize)
 
-  // 返回(CompositeByteBuf, 数组:该batch每个chunk长度)
   def allocCompositeBatch(chunkSizes: Array[Int]): CompositeByteBuf = {
     val buf = Unpooled.compositeBuffer(batchChunks)
     for (s <- chunkSizes) {
@@ -43,6 +52,39 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
     val buffers = consolidated.nioBuffers()
     for (b <- buffers) while (b.hasRemaining) fc.write(b)
     consolidated.release()
+    // 注意这里不用对原 buffer release，否则会二次释放
+  }
+
+  // 智能小块合并，只批量 release CompositeByteBuf
+  def smartConsolidateSmallComponents(
+      buf: CompositeByteBuf,
+      fc: FileChannel,
+      sizeThreshold: Int = 4 * 1024,
+      minConsecutive: Int = 4): Unit = {
+    // 自动合并连续小块
+    var i = 0
+    while (i < buf.numComponents) {
+      if (buf.component(i).readableBytes() < sizeThreshold) {
+        var j = i + 1
+        while (j < buf.numComponents && buf.component(j).readableBytes() < sizeThreshold) j += 1
+        val count = j - i
+        if (count >= minConsecutive) {
+          buf.consolidate(i, count)
+          // 合并后数量变少，重新开始
+          i = 0
+        } else {
+          i = j
+        }
+      } else {
+        i += 1
+      }
+    }
+    // 批量写
+    val nioBufs = buf.nioBuffers()
+    var remain = nioBufs.map(_.remaining().toLong).sum
+    while (remain > 0) remain -= fc.write(nioBufs)
+    // 注意不用对子 buf 单独 release！
+    // 只需调用 buf.release()，即可递归 release
   }
 
   test("file channel 1GB, random chunk size 1K~64K") {
@@ -50,10 +92,12 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
     outdir.mkdirs()
     println(s"随机chunk输出：每轮每片[1K~64K]，共${batchChunks}个chunk一批。测试1 GB.")
 
-    for ((desc, fn) <- Seq(
-      "单片写 method1_individualWrite" -> method1_individualWrite _
-//      "批量write(ByteBuffer[]) method2_batchWrite" -> method2_batchWrite _,
-//      "consolidate后一次写 method3_consolidateWrite" -> method3_consolidateWrite _
+    for ((desc, fn, needRelease) <- Seq(
+      ("单片写 method1_individualWrite",           method1_individualWrite _, true),
+//      ("批量write(ByteBuffer[]) method2_batchWrite", method2_batchWrite _,     true),
+//      ("consolidate后一次写 method3_consolidateWrite", method3_consolidateWrite _, false),
+//      ("智能小块合并（consolidate(int,int)）", (buf: CompositeByteBuf, fc: FileChannel) =>
+//        smartConsolidateSmallComponents(buf, fc, sizeThreshold = 4 * 1024, minConsecutive = 4), true)
     )) {
       val raf = new RandomAccessFile(new File(outdir, s"${desc.replaceAll("[^a-zA-Z0-9]", "")}.data"), "rw")
       val fc = raf.getChannel
@@ -62,10 +106,11 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
       var bidx = 0
       while (totalWrittenBytes < totalGB * 1024 * 1024 * 1024L) {
         val chunkSizes = genChunkSizes(batchChunks)
-        val buffer = allocCompositeBatch(chunkSizes)
+        val (buffer, _) = allocFlushBatch()
         fn(buffer, fc)
-        // 注意：consolidate分支已自动release，其它分支需要手动release
-        if (!desc.contains("consolidate")) buffer.release()
+        if (needRelease) {
+          buffer.release() // 只对需要的三种方式release一次
+        }
         val batchBytes = chunkSizes.sum
         totalWrittenBytes += batchBytes
         bidx += 1
@@ -76,9 +121,7 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
       fc.close(); raf.close()
       val used = (System.nanoTime() - start) / 1000000
       println(s"$desc : $used ms, 实际写入${totalWrittenBytes/1024/1024} MB")
-      // 注释掉自动删除，文件可用
-      // val file = new File(outdir, s"${desc.replaceAll("[^a-zA-Z0-9]", "")}.data")
-      // file.delete()
+      // 你可以取消自动删除，保留产出文件
     }
     println("测试完成！")
   }
