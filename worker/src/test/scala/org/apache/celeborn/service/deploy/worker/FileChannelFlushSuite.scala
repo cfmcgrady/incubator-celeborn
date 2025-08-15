@@ -89,6 +89,10 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
 
   test("file channel 1GB, random chunk size 1K~64K") {
     val outdir = new File("/tmp/fc_bench_test")
+    // ========= 删除目录 =========
+    if (outdir.exists) {
+      deleteDir(outdir)
+    }
     outdir.mkdirs()
     println(s"随机chunk输出：每轮每片[1K~64K]，共${batchChunks}个chunk一批。测试1 GB.")
 
@@ -105,13 +109,11 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
       var totalWrittenBytes: Long = 0
       var bidx = 0
       while (totalWrittenBytes < totalGB * 1024 * 1024 * 1024L) {
-        val chunkSizes = genChunkSizes(batchChunks)
-        val (buffer, _) = allocFlushBatch()
+        val (buffer, batchBytes) = allocFlushBatch()
         fn(buffer, fc)
         if (needRelease) {
-          buffer.release() // 只对需要的三种方式release一次
+          buffer.release()
         }
-        val batchBytes = chunkSizes.sum
         totalWrittenBytes += batchBytes
         bidx += 1
         if (bidx % 256 == 0) {
@@ -124,5 +126,12 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
       // 你可以取消自动删除，保留产出文件
     }
     println("测试完成！")
+  }
+
+  def deleteDir(dir: File): Unit = {
+    if (dir.exists) {
+      if (dir.isDirectory) dir.listFiles().foreach(deleteDir)
+      dir.delete()
+    }
   }
 }
