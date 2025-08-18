@@ -8,6 +8,7 @@ import java.nio.channels.FileChannel
 import io.netty.buffer.{CompositeByteBuf, Unpooled}
 import scala.util.Random
 
+// chunk不是8m么，跟flush task关系是什么？
 class FileChannelLargeFlushSuite extends CelebornFunSuite {
   val totalGB = 1
   val minChunkSize = 1         // 1B
@@ -79,10 +80,12 @@ class FileChannelLargeFlushSuite extends CelebornFunSuite {
         i += 1
       }
     }
+    val buffers = buf.nioBuffers()
+    for (b <- buffers) while (b.hasRemaining) fc.write(b)
     // 批量写
-    val nioBufs = buf.nioBuffers()
-    var remain = nioBufs.map(_.remaining().toLong).sum
-    while (remain > 0) remain -= fc.write(nioBufs)
+//    val niobufs = buf.niobuffers()
+//    var remain = niobufs.map(_.remaining().tolong).sum
+//    while (remain > 0) remain -= fc.write(niobufs)
     // 注意不用对子 buf 单独 release！
     // 只需调用 buf.release()，即可递归 release
   }

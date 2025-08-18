@@ -60,6 +60,8 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
 
   val timerSupplier = new TimerSupplier(metricsSlidingWindowSize)
 
+  val histogramSupplier = new HistogramSupplier(metricsSlidingWindowSize)
+
   val metricsCleaner: ScheduledExecutorService =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-metrics-cleaner")
 
@@ -71,6 +73,9 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
 
   protected val namedGauges: ConcurrentHashMap[String, NamedGauge[_]] =
     JavaUtils.newConcurrentHashMap[String, NamedGauge[_]]()
+
+  protected val namedHistogram: ConcurrentHashMap[String, NamedHistogram] =
+    JavaUtils.newConcurrentHashMap[String, NamedHistogram]()
 
   def addGauge[T](
       name: String,
@@ -141,6 +146,20 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
       NamedCounter(name, metricRegistry.counter(metricNameWithLabel), labels ++ staticLabels))
   }
 
+  def addHistogram(name: String): Unit = {
+    addHistogram(name, Map.empty)
+  }
+
+  def addHistogram(name: String, labels: Map[String, String]): Unit = {
+    val metricNameWithLabel = metricNameWithCustomizedLabels(name, labels)
+    namedHistogram.putIfAbsent(
+      metricNameWithLabel,
+      NamedHistogram(
+        name,
+        metricRegistry.histogram(name, histogramSupplier),
+        labels ++ staticLabels))
+  }
+
   def counters(): List[NamedCounter] = {
     namedCounters.values().asScala.toList
   }
@@ -150,7 +169,7 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
   }
 
   def histograms(): List[NamedHistogram] = {
-    List.empty[NamedHistogram]
+    namedHistogram.values().asScala.toList
   }
 
   def timers(): List[NamedTimer] = {
@@ -287,6 +306,20 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
     }
   }
 
+  def updateHistogram(name: String, value: Long): Unit = {
+    updateHistogram(name, Map.empty, value)
+  }
+
+  def updateHistogram(name: String, labels: Map[String, String], value: Long): Unit = {
+    val metricNameWithLabel = metricNameWithCustomizedLabels(name, labels)
+    val histogram = namedHistogram.get(metricNameWithLabel)
+    if (histogram != null) {
+      histogram.histogram.update(value)
+    } else {
+      logWarning(s"Metric $metricNameWithLabel not found!")
+    }
+  }
+
   private def clearOldValues(map: ConcurrentHashMap[String, Long]): Unit = {
     if (map.size > 5000) {
       // remove values has existed more than 15 min
@@ -387,15 +420,36 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
     updateInnerMetrics(sb.toString())
   }
 
+  def getHistogramMetrics(nh: NamedHistogram): String = {
+    val timestamp = System.currentTimeMillis
+    val sb = new mutable.StringBuilder
+    val snapshot = nh.histogram.getSnapshot
+    val prefix = normalizeKey(nh.name)
+    val label = nh.labelString
+    sb.append(s"${prefix}Count$label ${nh.histogram.getCount} $timestamp\n")
+    sb.append(s"${prefix}Max$label ${(snapshot.getMax)} $timestamp\n")
+    sb.append(s"${prefix}Mean$label ${(snapshot.getMean)} $timestamp\n")
+    sb.append(s"${prefix}Min$label ${(snapshot.getMin)} $timestamp\n")
+    sb.append(s"${prefix}50thPercentile$label" +
+      s" ${snapshot.getMedian} $timestamp\n")
+    sb.append(s"${prefix}75thPercentile$label" +
+      s" ${snapshot.get75thPercentile} $timestamp\n")
+    sb.append(s"${prefix}95thPercentile$label" +
+      s" ${snapshot.get95thPercentile} $timestamp\n")
+    sb.append(s"${prefix}98thPercentile$label" +
+      s" ${snapshot.get98thPercentile} $timestamp\n")
+    sb.append(s"${prefix}99thPercentile$label" +
+      s" ${snapshot.get99thPercentile} $timestamp\n")
+    sb.append(s"${prefix}999thPercentile$label" +
+      s" ${snapshot.get999thPercentile} $timestamp\n")
+    sb.toString()
+  }
+
   override def getMetrics(): String = {
     innerMetrics.synchronized {
       counters().foreach(c => recordCounter(c))
       gauges().foreach(g => recordGauge(g))
-      histograms().foreach(h => {
-        recordHistogram(h)
-        h.asInstanceOf[CelebornHistogram].reservoir
-          .asInstanceOf[ResettableSlidingWindowReservoir].reset()
-      })
+      histograms().foreach(h => recordHistogram(h))
       timers().foreach(t => {
         recordTimer(t)
         t.timer.asInstanceOf[CelebornTimer].reservoir
@@ -416,6 +470,7 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
     namedGauges.clear()
     namedTimers.clear()
     innerMetrics.clear()
+    namedHistogram.clear()
     metricRegistry.removeMatching(new MetricFilter {
       override def matches(s: String, metric: Metric): Boolean = true
     })
@@ -449,4 +504,11 @@ class TimerSupplier(val slidingWindowSize: Int)
 
 class GaugeSupplier[T](f: () => T) extends MetricRegistry.MetricSupplier[Gauge[_]] {
   override def newMetric(): Gauge[T] = new Gauge[T] { override def getValue: T = f() }
+}
+
+class HistogramSupplier(val slidingWindowSize: Int)
+  extends MetricRegistry.MetricSupplier[Histogram] {
+  override def newMetric(): Histogram = {
+    new CelebornHistogram(new ResettableSlidingWindowReservoir(slidingWindowSize))
+  }
 }
