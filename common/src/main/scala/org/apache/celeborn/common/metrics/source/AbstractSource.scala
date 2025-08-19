@@ -375,21 +375,21 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
     val prefix = normalizeKey(nh.name)
     val label = nh.labelString
     sb.append(s"${prefix}Count$label ${nh.histogram.getCount} $timestamp\n")
-    sb.append(s"${prefix}Max$label ${reportNanosAsMills(snapshot.getMax)} $timestamp\n")
-    sb.append(s"${prefix}Mean$label ${reportNanosAsMills(snapshot.getMean)} $timestamp\n")
-    sb.append(s"${prefix}Min$label ${reportNanosAsMills(snapshot.getMin)} $timestamp\n")
+    sb.append(s"${prefix}Max$label ${(snapshot.getMax)} $timestamp\n")
+    sb.append(s"${prefix}Mean$label ${(snapshot.getMean)} $timestamp\n")
+    sb.append(s"${prefix}Min$label ${(snapshot.getMin)} $timestamp\n")
     sb.append(s"${prefix}50thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.getMedian)} $timestamp\n")
+      s" ${snapshot.getMedian} $timestamp\n")
     sb.append(s"${prefix}75thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.get75thPercentile)} $timestamp\n")
+      s" ${snapshot.get75thPercentile} $timestamp\n")
     sb.append(s"${prefix}95thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.get95thPercentile)} $timestamp\n")
+      s" ${snapshot.get95thPercentile} $timestamp\n")
     sb.append(s"${prefix}98thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.get98thPercentile)} $timestamp\n")
+      s" ${snapshot.get98thPercentile} $timestamp\n")
     sb.append(s"${prefix}99thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.get99thPercentile)} $timestamp\n")
+      s" ${snapshot.get99thPercentile} $timestamp\n")
     sb.append(s"${prefix}999thPercentile$label" +
-      s" ${reportNanosAsMills(snapshot.get999thPercentile)} $timestamp\n")
+      s" ${snapshot.get999thPercentile} $timestamp\n")
 
     updateInnerMetrics(sb.toString())
   }
