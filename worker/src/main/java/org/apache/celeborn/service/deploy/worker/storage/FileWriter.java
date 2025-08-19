@@ -217,10 +217,12 @@ public abstract class FileWriter implements DeviceObserver {
       }
       if (flushBuffer.readableBytes() != 0
           && flushBuffer.readableBytes() + numBytes >= flusherBufferSize) {
+        source.updateHistogram(WorkerSource.FLUSH_BUFFER_COMPONENT_COUNT(), flushBuffer.numComponents());
         flush(false);
       }
 
       data.retain();
+      source.updateHistogram(WorkerSource.FLUSH_BUFFER_COMPONENT_DATA_SIZE(), data.readableBytes());
       flushBuffer.addComponent(true, data);
     }
 
