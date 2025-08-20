@@ -81,18 +81,6 @@ public abstract class CelebornInputStream extends InputStream {
         partitionLocationToChunkRange =
             CelebornPartitionUtil.splitSkewedPartitionLocations(
                 new ArrayList(Arrays.asList(locations)), startMapIndex, endMapIndex);
-        for (PartitionLocation l : locations) {
-          System.out.print("id....." + l.getUniqueId());
-          for (long o : l.getStorageInfo().getChunkOffsets()) {
-            System.out.print(o + ", ");
-          }
-          System.out.println();
-        }
-        for (String id : partitionLocationToChunkRange.keySet()) {
-          long left = partitionLocationToChunkRange.get(id).getLeft();
-          long right = partitionLocationToChunkRange.get(id).getRight();
-          System.out.println("id....." + id + " [ " + left + ", " + right + " ]");
-        }
       }
       return new CelebornInputStreamImpl(
           conf,
@@ -383,7 +371,7 @@ public abstract class CelebornInputStream extends InputStream {
           lastException = e;
           excludeFailedLocation(location, e);
           fetchChunkRetryCnt++;
-          if (location.hasPeer()) {
+          if (location.hasPeer() && !splitSkewPartitionWithoutMapRange) {
             // fetchChunkRetryCnt % 2 == 0 means both replicas have been tried,
             // so sleep before next try.
             if (fetchChunkRetryCnt % 2 == 0) {
@@ -443,7 +431,7 @@ public abstract class CelebornInputStream extends InputStream {
                     + currentReader.getLocation(),
                 e);
           } else {
-            if (currentReader.getLocation().hasPeer()) {
+            if (currentReader.getLocation().hasPeer() && !splitSkewPartitionWithoutMapRange) {
               logger.warn(
                   "Fetch chunk failed {}/{} times for location {}, change to peer",
                   fetchChunkRetryCnt,
@@ -654,6 +642,7 @@ public abstract class CelebornInputStream extends InputStream {
           return false;
         }
 
+        PushFailedBatch failedBatch = new PushFailedBatch(-1, -1, -1);
         boolean hasData = false;
         while (currentChunk.isReadable() || moveToNextChunk()) {
           currentChunk.readBytes(sizeBuf);
@@ -678,6 +667,20 @@ public abstract class CelebornInputStream extends InputStream {
 
           // de-duplicate
           if (attemptId == attempts[mapId]) {
+
+            if (splitSkewPartitionWithoutMapRange) {
+              Set<PushFailedBatch> failedBatchSet =
+                      this.failedBatches.get(currentReader.getLocation().getUniqueId());
+              if (null != failedBatchSet) {
+                failedBatch.setMapId(mapId);
+                failedBatch.setAttemptId(attemptId);
+                failedBatch.setBatchId(batchId);
+                if (failedBatchSet.contains(failedBatch)) {
+                  logger.warn("Skip duplicated batch: {}.", failedBatch);
+                  continue;
+                }
+              }
+            }
             if (!batchesRead.containsKey(mapId)) {
               Set<Integer> batchSet = new HashSet<>();
               batchesRead.put(mapId, batchSet);
