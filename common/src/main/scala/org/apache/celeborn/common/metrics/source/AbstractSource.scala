@@ -28,7 +28,7 @@ import com.codahale.metrics._
 
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.internal.Logging
-import org.apache.celeborn.common.metrics.{CelebornHistogram, CelebornTimer, MetricLabels, ResettableSlidingWindowReservoir}
+import org.apache.celeborn.common.metrics.{CelebornHistogram, CelebornTimer, MetricLabels}
 import org.apache.celeborn.common.util.{JavaUtils, ThreadUtils, Utils}
 // Can Remove this if celeborn don't support scala211 in future
 import org.apache.celeborn.common.util.FunctionConverter._
@@ -58,9 +58,9 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
 
   val innerMetrics: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue[String]()
 
-  val timerSupplier = new TimerSupplier(metricsSlidingWindowSize)
+  val timerSupplier = new TimerSupplier()
 
-  val histogramSupplier = new HistogramSupplier(metricsSlidingWindowSize)
+  val histogramSupplier = new HistogramSupplier()
 
   val metricsCleaner: ScheduledExecutorService =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-metrics-cleaner")
@@ -447,14 +447,10 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
 
   override def getMetrics(): String = {
     innerMetrics.synchronized {
-      counters().foreach(c => recordCounter(c))
-      gauges().foreach(g => recordGauge(g))
-      histograms().foreach(h => recordHistogram(h))
-      timers().foreach(t => {
-        recordTimer(t)
-        t.timer.asInstanceOf[CelebornTimer].reservoir
-          .asInstanceOf[ResettableSlidingWindowReservoir].reset()
-      })
+      counters().foreach(recordCounter)
+      gauges().foreach(recordGauge)
+      histograms().foreach(recordHistogram)
+      timers().foreach(recordTimer)
       val sb = new mutable.StringBuilder
       while (!innerMetrics.isEmpty) {
         sb.append(innerMetrics.poll())
@@ -495,7 +491,7 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
   }
 }
 
-class TimerSupplier(val slidingWindowSize: Int)
+class TimerSupplier()
   extends MetricRegistry.MetricSupplier[Timer] {
   override def newMetric(): Timer = {
     new CelebornTimer(new ExponentiallyDecayingReservoir())
@@ -506,7 +502,7 @@ class GaugeSupplier[T](f: () => T) extends MetricRegistry.MetricSupplier[Gauge[_
   override def newMetric(): Gauge[T] = new Gauge[T] { override def getValue: T = f() }
 }
 
-class HistogramSupplier(val slidingWindowSize: Int)
+class HistogramSupplier()
   extends MetricRegistry.MetricSupplier[Histogram] {
   override def newMetric(): Histogram = {
     new CelebornHistogram(new ExponentiallyDecayingReservoir())
