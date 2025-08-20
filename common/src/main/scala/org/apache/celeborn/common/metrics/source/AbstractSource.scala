@@ -498,7 +498,7 @@ abstract class AbstractSource(conf: CelebornConf, role: String)
 class TimerSupplier(val slidingWindowSize: Int)
   extends MetricRegistry.MetricSupplier[Timer] {
   override def newMetric(): Timer = {
-    new CelebornTimer(new ResettableSlidingWindowReservoir(slidingWindowSize))
+    new CelebornTimer(new ExponentiallyDecayingReservoir())
   }
 }
 
@@ -509,6 +509,6 @@ class GaugeSupplier[T](f: () => T) extends MetricRegistry.MetricSupplier[Gauge[_
 class HistogramSupplier(val slidingWindowSize: Int)
   extends MetricRegistry.MetricSupplier[Histogram] {
   override def newMetric(): Histogram = {
-    new CelebornHistogram(new ResettableSlidingWindowReservoir(slidingWindowSize))
+    new CelebornHistogram(new ExponentiallyDecayingReservoir())
   }
 }
