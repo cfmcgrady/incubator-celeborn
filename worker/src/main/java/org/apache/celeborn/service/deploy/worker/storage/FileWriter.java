@@ -71,6 +71,7 @@ public abstract class FileWriter implements DeviceObserver {
   private final long writerCloseTimeoutMs;
 
   protected final long flusherBufferSize;
+  protected final boolean flusherLocalGatherAPIEnabled;
 
   protected final DeviceMonitor deviceMonitor;
   protected final AbstractSource source; // metrics
@@ -108,6 +109,7 @@ public abstract class FileWriter implements DeviceObserver {
     this.splitMode = splitMode;
     this.partitionType = partitionType;
     this.rangeReadFilter = rangeReadFilter;
+    this.flusherLocalGatherAPIEnabled = conf.workerFlusherLocalGatherAPIEnabled();
     if (!fileInfo.isHdfs()) {
       this.flusherBufferSize = conf.workerFlusherBufferSize();
       channel = FileChannelUtils.createWritableFileChannel(fileInfo.getFilePath());
@@ -162,7 +164,7 @@ public abstract class FileWriter implements DeviceObserver {
           notifier.numPendingFlushes.incrementAndGet();
           FlushTask task = null;
           if (channel != null) {
-            task = new LocalFlushTask(flushBuffer, channel, notifier);
+            task = new LocalFlushTask(flushBuffer, channel, notifier, flusherLocalGatherAPIEnabled);
           } else if (fileInfo.isHdfs()) {
             task = new HdfsFlushTask(flushBuffer, fileInfo.getHdfsPath(), notifier);
           }
