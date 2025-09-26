@@ -55,7 +55,9 @@ class SkewJoinSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("celeborn-demo")
           .setMaster("local[2]")
           .set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, "true")
-          .set(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .set(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .set("spark.sql.adaptive.skewJoin.enabled", "true")
           .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "16MB")
           .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "12MB")

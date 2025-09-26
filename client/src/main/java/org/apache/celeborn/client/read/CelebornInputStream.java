@@ -670,7 +670,7 @@ public abstract class CelebornInputStream extends InputStream {
 
             if (splitSkewPartitionWithoutMapRange) {
               Set<PushFailedBatch> failedBatchSet =
-                      this.failedBatches.get(currentReader.getLocation().getUniqueId());
+                  this.failedBatches.get(currentReader.getLocation().getUniqueId());
               if (null != failedBatchSet) {
                 failedBatch.setMapId(mapId);
                 failedBatch.setAttemptId(attemptId);

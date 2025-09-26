@@ -451,12 +451,12 @@ class FetchHandler(
   /** Invoked when the channel associated with the given client is active. */
   override def channelActive(client: TransportClient): Unit = {
     logDebug(s"channel active ${client.getSocketAddress}")
-    workerSource.incCounter(WorkerSource.ACTIVE_CONNECTION_COUNT)
+    workerSource.incCounter(WorkerSource.ACTIVE_FETCH_CONNECTION_COUNT)
     super.channelActive(client)
   }
 
   override def channelInactive(client: TransportClient): Unit = {
-    workerSource.incCounter(WorkerSource.ACTIVE_CONNECTION_COUNT, -1)
+    workerSource.incCounter(WorkerSource.ACTIVE_FETCH_CONNECTION_COUNT, -1)
     creditStreamManager.connectionTerminated(client.getChannel)
     logDebug(s"channel inactive ${client.getSocketAddress}")
   }

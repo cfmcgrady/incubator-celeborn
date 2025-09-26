@@ -1515,7 +1515,7 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
    * Invoked when the channel associated with the given client is active.
    */
   override def channelActive(client: TransportClient): Unit = {
-    workerSource.incCounter(WorkerSource.ACTIVE_CONNECTION_COUNT)
+    workerSource.incCounter(WorkerSource.ACTIVE_PUSH_CONNECTION_COUNT)
     super.channelActive(client)
   }
 
@@ -1524,7 +1524,7 @@ class PushDataHandler(val workerSource: WorkerSource) extends BaseMessageHandler
    * No further requests will come from this client.
    */
   override def channelInactive(client: TransportClient): Unit = {
-    workerSource.incCounter(WorkerSource.ACTIVE_CONNECTION_COUNT, -1)
+    workerSource.incCounter(WorkerSource.ACTIVE_PUSH_CONNECTION_COUNT, -1)
     super.channelInactive(client)
   }
 }

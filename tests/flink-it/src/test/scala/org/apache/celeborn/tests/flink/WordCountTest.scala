@@ -63,7 +63,9 @@ class WordCountTest extends AnyFunSuite with Logging with MiniClusterFeature
         "shuffle-service-factory.class",
         "org.apache.celeborn.plugin.flink.RemoteShuffleServiceFactory")
       configuration.setString("celeborn.master.endpoints", "localhost:9097")
-      configuration.setString(CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key, mockReserveFailure.toString)
+      configuration.setString(
+        CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key,
+        mockReserveFailure.toString)
       configuration.setString("execution.batch-shuffle-mode", "ALL_EXCHANGES_BLOCKING")
       configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH)
       configuration.setString("taskmanager.memory.network.min", "1024m")

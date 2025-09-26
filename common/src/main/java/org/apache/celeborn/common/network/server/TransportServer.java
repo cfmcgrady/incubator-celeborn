@@ -19,7 +19,9 @@ package org.apache.celeborn.common.network.server;
 
 import java.io.Closeable;
 import java.net.InetSocketAddress;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Preconditions;
@@ -31,6 +33,8 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.SingleThreadEventExecutor;
 import org.apache.commons.lang3.SystemUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -174,5 +178,20 @@ public class TransportServer implements Closeable {
       }
     }
     bootstrap = null;
+  }
+
+  public Map<String, Integer> getWorkerPendingTasks() {
+    Map<String, Integer> result = new LinkedHashMap<>();
+    if (bootstrap != null && bootstrap.config().childGroup() != null) {
+      for (EventExecutor exec : bootstrap.config().childGroup()) {
+        if (exec instanceof SingleThreadEventExecutor) {
+          SingleThreadEventExecutor single = (SingleThreadEventExecutor) exec;
+          String threadName = single.threadProperties().name();
+          int pending = single.pendingTasks();
+          result.put(threadName, pending);
+        }
+      }
+    }
+    return result;
   }
 }

@@ -48,7 +48,9 @@ class ReusedExchangeSuite extends AnyFunSuite
       val mockReserveFailure: Boolean = params(pi)
       val sparkConf = new SparkConf().setAppName("celeborn-test").setMaster("local[2]")
         .set("spark.shuffle.manager", "org.apache.spark.shuffle.celeborn.SparkShuffleManager")
-        .set(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+        .set(
+          s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+          mockReserveFailure.toString)
         .set(s"spark.${CelebornConf.MASTER_ENDPOINTS.key}", masterInfo._1.rpcEnv.address.toString)
         .set(s"spark.${CelebornConf.READ_LOCAL_SHUFFLE_FILE.key}", readLocalShuffle.toString)
         .set("spark.sql.autoBroadcastJoinThreshold", "-1")
@@ -71,20 +73,20 @@ class ReusedExchangeSuite extends AnyFunSuite
         .createOrReplaceTempView("tc")
 
       spark.sql(
-          """
-            |SELECT *
-            |FROM ta
-            |LEFT JOIN tb ON ta.k1 = tb.k21
-            |LEFT JOIN tc ON tb.k22 = tc.k3
-            |""".stripMargin)
+        """
+          |SELECT *
+          |FROM ta
+          |LEFT JOIN tb ON ta.k1 = tb.k21
+          |LEFT JOIN tc ON tb.k22 = tc.k3
+          |""".stripMargin)
         .createOrReplaceTempView("v1")
 
       spark.sql(
-          """
-            |SELECT * FROM v1 WHERE v3 IS NOT NULL
-            |UNION
-            |SELECT * FROM v1
-            |""".stripMargin)
+        """
+          |SELECT * FROM v1 WHERE v3 IS NOT NULL
+          |UNION
+          |SELECT * FROM v1
+          |""".stripMargin)
         .collect()
       spark.stop
     }
