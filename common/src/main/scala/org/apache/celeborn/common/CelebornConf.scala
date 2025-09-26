@@ -748,6 +748,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def metricsWorkerForceAppendPauseSpentTimeThreshold: Int =
     get(METRICS_WORKER_PAUSE_SPENT_TIME_FORCE_APPEND_THRESHOLD)
   def metricsJsonPrettyEnabled: Boolean = get(METRICS_JSON_PRETTY_ENABLED)
+  def metricsWorkerReportHistogramIntervalMs: Long = get(METRICS_WORKER_REPORT_HISTOGRAM_INTERVAL)
 
   // //////////////////////////////////////////////////////
   //                      Quota                         //
@@ -4181,6 +4182,15 @@ object CelebornConf extends Logging {
       .version("0.4.0")
       .booleanConf
       .createWithDefault(true)
+
+  val METRICS_WORKER_REPORT_HISTOGRAM_INTERVAL: ConfigEntry[Long] =
+    buildConf("celeborn.metrics.worker.reportHistogram.interval")
+      .categories("metrics")
+      .version("0.4.1.4")
+      .doc("Interval for the worker reports histogram metrics.")
+      .timeConf(TimeUnit.MILLISECONDS)
+      .createWithDefaultString("10s")
+
 
   val QUOTA_ENABLED: ConfigEntry[Boolean] =
     buildConf("celeborn.quota.enabled")

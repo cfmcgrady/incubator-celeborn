@@ -47,7 +47,7 @@ import org.apache.celeborn.common.util.{CelebornExitKind, JavaUtils, ShutdownHoo
 // Can Remove this if celeborn don't support scala211 in future
 import org.apache.celeborn.common.util.FunctionConverter._
 import org.apache.celeborn.server.common.{HttpService, Service}
-import org.apache.celeborn.service.deploy.worker.WorkerSource.ACTIVE_CONNECTION_COUNT
+import org.apache.celeborn.service.deploy.worker.WorkerSource.{ACTIVE_FETCH_CONNECTION_COUNT, ACTIVE_PUSH_CONNECTION_COUNT}
 import org.apache.celeborn.service.deploy.worker.congestcontrol.CongestionController
 import org.apache.celeborn.service.deploy.worker.memory.{ChannelsLimiter, MemoryManager}
 import org.apache.celeborn.service.deploy.worker.memory.MemoryManager.ServingState
@@ -250,6 +250,8 @@ private[celeborn] class Worker(
   // Threads
   private val forwardMessageScheduler: ScheduledExecutorService =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor("worker-forward-message-scheduler")
+  private val metricsReporterService: ScheduledExecutorService =
+    ThreadUtils.newDaemonSingleThreadScheduledExecutor("histogram-metrics-reporter")
   private var sendHeartbeatTask: ScheduledFuture[_] = _
   private var checkFastFailTask: ScheduledFuture[_] = _
 
@@ -332,13 +334,47 @@ private[celeborn] class Worker(
   workerSource.addGauge(WorkerSource.PAUSE_PUSH_DATA_AND_REPLICATE_COUNT) { () =>
     memoryManager.getPausePushDataAndReplicateCounter
   }
+  reportNettyWorkerPendingTasks()
+
+  private def reportNettyWorkerPendingTasks(): Unit = {
+    workerSource.addHistogram(WorkerSource.FETCH_SERVER_WORKER_PENDING_TASK_COUNT)
+    workerSource.addHistogram(WorkerSource.PUSH_SERVER_WORKER_PENDING_TASK_COUNT)
+    workerSource.addHistogram(WorkerSource.REPLICATE_SERVER_WORKER_PENDING_TASK_COUNT)
+    metricsReporterService.scheduleWithFixedDelay(
+      new Runnable {
+        override def run(): Unit = {
+          fetchServer.getWorkerPendingTasks.asScala.foreach {
+            case (_, count) =>
+              workerSource.updateHistogram(
+                WorkerSource.FETCH_SERVER_WORKER_PENDING_TASK_COUNT,
+                count.toLong)
+          }
+          pushServer.getWorkerPendingTasks.asScala.foreach {
+            case (_, count) =>
+              workerSource.updateHistogram(
+                WorkerSource.PUSH_SERVER_WORKER_PENDING_TASK_COUNT,
+                count.toLong)
+          }
+          replicateServer.getWorkerPendingTasks.asScala.foreach {
+            case (_, count) =>
+              workerSource.updateHistogram(
+                WorkerSource.REPLICATE_SERVER_WORKER_PENDING_TASK_COUNT,
+                count.toLong)
+          }
+        }
+      },
+      conf.metricsWorkerReportHistogramIntervalMs,
+      conf.metricsWorkerReportHistogramIntervalMs,
+      TimeUnit.MILLISECONDS)
+  }
 
   private def highWorkload: Boolean = {
     (memoryManager.currentServingState, conf.workerActiveConnectionMax) match {
       case (ServingState.PUSH_AND_REPLICATE_PAUSED, _) => true
       case (ServingState.PUSH_PAUSED, _) => true
       case (_, Some(activeConnectionMax)) =>
-        workerSource.getCounterCount(ACTIVE_CONNECTION_COUNT) >= activeConnectionMax
+        workerSource.getCounterCount(ACTIVE_FETCH_CONNECTION_COUNT) + workerSource.getCounterCount(
+          ACTIVE_PUSH_CONNECTION_COUNT) >= activeConnectionMax
       case _ => false
     }
   }

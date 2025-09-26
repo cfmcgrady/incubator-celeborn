@@ -42,7 +42,8 @@ class WorkerSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   addCounter(PUSH_DATA_HANDSHAKE_FAIL_COUNT)
   addCounter(REGION_START_FAIL_COUNT)
   addCounter(REGION_FINISH_FAIL_COUNT)
-  addCounter(ACTIVE_CONNECTION_COUNT)
+  addCounter(ACTIVE_FETCH_CONNECTION_COUNT)
+  addCounter(ACTIVE_PUSH_CONNECTION_COUNT)
 
   addCounter(SLOTS_ALLOCATED)
 
@@ -135,7 +136,13 @@ object WorkerSource {
   val RESERVE_SLOTS_TIME = "ReserveSlotsTime"
 
   // connection
-  val ACTIVE_CONNECTION_COUNT = "ActiveConnectionCount"
+  val ACTIVE_FETCH_CONNECTION_COUNT = "ActiveFetchConnectionCount"
+  val ACTIVE_PUSH_CONNECTION_COUNT = "ActivePushConnectionCount"
+
+  // netty
+  val FETCH_SERVER_WORKER_PENDING_TASK_COUNT = "FetchServerWorkerPendingTaskCount"
+  val PUSH_SERVER_WORKER_PENDING_TASK_COUNT = "PushServerWorkerPendingTaskCount"
+  val REPLICATE_SERVER_WORKER_PENDING_TASK_COUNT = "ReplicateServerWorkerPendingTaskCount"
 
   // memory
   val NETTY_MEMORY = "NettyMemory"

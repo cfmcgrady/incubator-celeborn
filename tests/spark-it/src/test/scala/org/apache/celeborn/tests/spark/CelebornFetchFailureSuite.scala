@@ -101,7 +101,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -148,7 +150,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -186,7 +190,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -223,7 +229,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -269,7 +277,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -307,7 +317,9 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val sparkConf = new SparkConf().setAppName("rss-demo").setMaster("local[2,3]")
         val sparkSession = SparkSession.builder()
           .config(updateSparkConf(sparkConf, ShuffleMode.HASH))
-          .config(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .config(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .config("spark.sql.shuffle.partitions", 2)
           .config("spark.celeborn.shuffle.forceFallback.partition.enabled", false)
           .config("spark.celeborn.shuffle.enabled", "true")
@@ -328,24 +340,28 @@ class CelebornFetchFailureSuite extends AnyFunSuite
   }
 
   test(s"celeborn spark integration test - fetch failure with skewed data and reused exchange") {
-    val params = Array((true,false),(false,false),(false,true),(true,true))
+    val params = Array((true, false), (false, false), (false, true), (true, true))
     for (pi <- params.indices) {
       val (mockReserveFailure: Boolean, replicateEnabled: Boolean) = params(pi)
       if (Spark3OrNewer) {
         val sparkConf = new SparkConf().setAppName("celeborn-demo")
           .setMaster("local[2]")
           .set(SQLConf.ADAPTIVE_EXECUTION_ENABLED.key, "true")
-          .set(s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}", mockReserveFailure.toString)
+          .set(
+            s"spark.${CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key}",
+            mockReserveFailure.toString)
           .set("spark.sql.adaptive.skewJoin.enabled", "true")
           .set("spark.sql.adaptive.coalescePartitions.enabled", "false")
           .set("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes", "100KB")
           .set("spark.sql.adaptive.advisoryPartitionSizeInBytes", "100KB")
-          .set("spark.sql.adaptive.skewJoin.skewedPartitionFactor","2")
+          .set("spark.sql.adaptive.skewJoin.skewedPartitionFactor", "2")
           .set("spark.sql.adaptive.autoBroadcastJoinThreshold", "-1")
           .set(SQLConf.PARQUET_COMPRESSION.key, "gzip")
           .set(s"spark.${CelebornConf.SHUFFLE_COMPRESSION_CODEC.key}", "NONE")
           .set(s"spark.${CelebornConf.SHUFFLE_RANGE_READ_FILTER_ENABLED.key}", "true")
-          .set(s"spark.${CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key}", replicateEnabled.toString)
+          .set(
+            s"spark.${CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key}",
+            replicateEnabled.toString)
           .set("spark.sql.adaptive.coalescePartitions.initialPartitionNum", "8")
           .set("spark.celeborn.client.spark.fetch.throwsFetchFailure", "true")
           .set("spark.sql.shuffle.partitions", "8")
@@ -367,7 +383,8 @@ class CelebornFetchFailureSuite extends AnyFunSuite
         val skewedSize = 200000
         val skewedData = (1 to skewedSize).map(i => (1, s"fsa-$i", s"fsb-$i", s"fsc-$i", s"fsd-$i"))
         val allData = skewedData ++ nonSkewedData
-        val df = sparkSession.sparkContext.parallelize(allData, 8).toDF("fa", "f1", "f2", "f3", "f4")
+        val df =
+          sparkSession.sparkContext.parallelize(allData, 8).toDF("fa", "f1", "f2", "f3", "f4")
         df.createOrReplaceTempView("view1")
         val smallTableData = Seq(
           (1, "S1", "S2", "S3", "S4"),
@@ -378,13 +395,19 @@ class CelebornFetchFailureSuite extends AnyFunSuite
           (5, "S21", "S22", "S23", "S24"),
           (6, "S25", "S26", "S27", "S28"),
           (7, "S29", "S30", "S31", "S32"),
-          (8, "S33", "S34", "S35", "S36")
-        )
-        val df2 = sparkSession.sparkContext.parallelize(smallTableData, 8).toDF("fb", "f6", "f7", "f8", "f9")
+          (8, "S33", "S34", "S35", "S36"))
+        val df2 = sparkSession.sparkContext.parallelize(smallTableData, 8).toDF(
+          "fb",
+          "f6",
+          "f7",
+          "f8",
+          "f9")
         df2.createOrReplaceTempView("view2")
         sparkSession.sql("SELECT * from view1 a inner join view2 b on a.fa=b.fb")
           .createOrReplaceTempView("v1")
-        val result = sparkSession.sql("select count(*) from ( select * from v1 union all select * from v1)").collect()(0).getLong(0)
+        val result = sparkSession.sql(
+          "select count(*) from ( select * from v1 union all select * from v1)").collect()(
+          0).getLong(0)
         // verify result
         assert(hook.executed.get() == true)
         assert(result == 800014, s"Expected 800014 rows but got $result")

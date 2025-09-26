@@ -33,4 +33,5 @@ license: |
 | celeborn.metrics.sample.rate | 1.0 | It controls if Celeborn collect timer metrics for some operations. Its value should be in [0.0, 1.0]. | 0.2.0 |  | 
 | celeborn.metrics.timer.slidingWindow.size | 4096 | The sliding window size of timer metric. | 0.2.0 |  | 
 | celeborn.metrics.worker.pauseSpentTime.forceAppend.threshold | 10 | Force append worker pause spent time even if worker still in pause serving state.Help user can find worker pause spent time increase, when worker always been pause state. |  |  | 
+| celeborn.metrics.worker.reportHistogram.interval | 10s | Interval for the worker reports histogram metrics. | 0.4.1.4 |  | 
 <!--end-include-->

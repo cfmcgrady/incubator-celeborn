@@ -37,7 +37,7 @@ public class CelebornPartitionUtilSuiteJ {
     Long sum = 0L;
     for (int i = 0; i < partitionNumber; i++) {
       Map<String, Pair<Integer, Integer>> res =
-              CelebornPartitionUtil.splitSkewedPartitionLocations(locations, partitionNumber, i);
+          CelebornPartitionUtil.splitSkewedPartitionLocations(locations, partitionNumber, i);
       if (!res.isEmpty()) {
         int l = res.get(loc.getUniqueId()).getLeft();
         int r = res.get(loc.getUniqueId()).getRight();
