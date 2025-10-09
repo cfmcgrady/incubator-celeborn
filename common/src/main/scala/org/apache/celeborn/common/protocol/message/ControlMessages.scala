@@ -508,11 +508,11 @@ object ControlMessages extends Logging {
     case pb: PbReportFailure =>
       new TransportMessage(MessageType.REPORT_FAILURE, pb.toByteArray)
 
-    case pb: PbReportFailureResponse =>
-      new TransportMessage(MessageType.REPORT_FAILURE_RESPONSE, pb.toByteArray)
-
     case pb: PbPushMergedDataSplitPartitionInfo =>
       new TransportMessage(MessageType.PUSH_MERGED_DATA_SPLIT_PARTITION_INFO, pb.toByteArray)
+
+    case pb: PbReportApplicationCounterMetrics =>
+      new TransportMessage(MessageType.REPORT_APPLICATION_COUNTER_METRICS, pb.toByteArray)
 
     case HeartbeatFromWorker(
           host,
@@ -1055,8 +1055,8 @@ object ControlMessages extends Logging {
       case REPORT_FAILURE_VALUE =>
         message.getParsedPayload()
 
-      case REPORT_FAILURE_RESPONSE_VALUE =>
-        message.getParsedPayload()
+      case REPORT_APPLICATION_COUNTER_METRICS_VALUE =>
+        PbReportApplicationCounterMetrics.parseFrom(message.getPayload)
 
       case UNREGISTER_SHUFFLE_VALUE =>
         PbUnregisterShuffle.parseFrom(message.getPayload)

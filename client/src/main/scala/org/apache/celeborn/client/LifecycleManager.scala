@@ -266,6 +266,10 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     case StageEnd(shuffleId) =>
       logInfo(s"Received StageEnd request, shuffleId $shuffleId.")
       handleStageEnd(shuffleId)
+    case pb: PbReportFailure =>
+      val failureType = FailureType.fromValue(pb.getFailureType)
+      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
+      handleReportFailure(failureType)
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
@@ -377,11 +381,6 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       val failureType = FailureType.fromValue(pb.getFailureType)
       logDebug(s"Received ReportShuffleFetchFailure request, appShuffleId $appShuffleId shuffleId $shuffleId failureType=${failureType.name()}")
       handleReportShuffleFetchFailure(context, appShuffleId, shuffleId, failureType)
-
-    case pb: PbReportFailure =>
-      val failureType = FailureType.fromValue(pb.getFailureType)
-      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
-      handleReportFailure(context, failureType)
   }
 
   def setupEndpoints(
@@ -903,10 +902,9 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
         failureType,
         new util.function.Function[FailureType, Boolean]() {
           override def apply(ft: FailureType): Boolean = {
-            masterClient.send[PbReportFailureResponse](
+            masterClient.send(
               PbReportFailure.newBuilder().setAppId(appUniqueId).setFailureType(
-                failureType.getValue).build(),
-              classOf[PbReportFailureResponse])
+                failureType.getValue).build())
             true
           }
         })
@@ -914,9 +912,12 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     reportedFailure.get(failureType)
   }
 
-  private def handleReportFailure(context: RpcCallContext, failureType: FailureType): Unit = {
-    context.reply(
-      PbReportFailureResponse.newBuilder().setSuccess(reportFailureToMaster(failureType)).build())
+  def reportMasterApplicationCounterMetrics(message: PbReportApplicationCounterMetrics): Unit = {
+    masterClient.send(message)
+  }
+
+  private def handleReportFailure(failureType: FailureType): Unit = {
+    reportFailureToMaster(failureType)
   }
 
   private def handleStageEnd(shuffleId: Int): Unit = {

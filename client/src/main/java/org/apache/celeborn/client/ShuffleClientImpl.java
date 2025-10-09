@@ -581,11 +581,7 @@ public class ShuffleClientImpl extends ShuffleClient {
             .setFailureType(failureType.getValue())
             .setAppId(appUniqueId)
             .build();
-    PbReportFailureResponse pbReportFailureResponse =
-        lifecycleManagerRef.askSync(
-            pbReportFailure,
-            conf.rpcAskTimeout(),
-            ClassTag$.MODULE$.apply(PbReportFailureResponse.class));
+    lifecycleManagerRef.send(pbReportFailure);
   }
 
   private ConcurrentHashMap<Integer, PartitionLocation> registerShuffleInternal(

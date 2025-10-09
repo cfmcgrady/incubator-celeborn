@@ -783,6 +783,8 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def clientMrMaxPushData: Long = get(CLIENT_MR_PUSH_DATA_MAX)
   def clientPartitionSplitNum: Int = get(CLEINT_PATITION_SPLIT_NUM)
   def clientMaxWriteParallelism: Int = get(CLEINT_PATITION_MAX_WRITE_PARALLELISM)
+  def clientReportApplicationMetricsToMasterEnabled: Boolean =
+    get(CLIENT_REPORT_APPLICATION_METRICS_TO_MASTER)
 
   // //////////////////////////////////////////////////////
   //               Shuffle Compression                   //
@@ -3428,6 +3430,16 @@ object CelebornConf extends Logging {
       .timeConf(TimeUnit.MILLISECONDS)
       .checkValue(_ > 0, "Value must be positive!")
       .createWithDefaultString("120s")
+
+  val CLIENT_REPORT_APPLICATION_METRICS_TO_MASTER: ConfigEntry[Boolean] =
+    buildConf("celeborn.client.reportApplicationMetricsToMaster.enabled")
+      .categories("client")
+      .version("0.4.1.4")
+      .doc(
+        "Whether the client should report application metrics to the master. " +
+          "When enabled, only job and application failures caused by Celeborn counters are reported.")
+      .booleanConf
+      .createWithDefault(true)
 
   val TEST_CLIENT_PUSH_PRIMARY_DATA_TIMEOUT: ConfigEntry[Boolean] =
     buildConf("celeborn.test.worker.pushPrimaryDataTimeout")

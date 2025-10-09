@@ -89,12 +89,12 @@ public class TransportMessage implements Serializable {
         return (T) PbReportShuffleFetchFailureResponse.parseFrom(payload);
       case REPORT_FAILURE_VALUE:
         return (T) PbReportFailure.parseFrom(payload);
-      case REPORT_FAILURE_RESPONSE_VALUE:
-        return (T) PbReportFailureResponse.parseFrom(payload);
       case SASL_REQUEST_VALUE:
         return (T) PbSaslRequest.parseFrom(payload);
       case PUSH_MERGED_DATA_SPLIT_PARTITION_INFO_VALUE:
         return (T) PbPushMergedDataSplitPartitionInfo.parseFrom(payload);
+      case REPORT_APPLICATION_COUNTER_METRICS_VALUE:
+        return (T) PbReportApplicationCounterMetrics.parseFrom(payload);
       default:
         logger.error("Unexpected type {}", type);
     }

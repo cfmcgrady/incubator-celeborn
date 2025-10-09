@@ -42,7 +42,6 @@ import org.apache.celeborn.common.protocol.message.{ControlMessages, FailureType
 import org.apache.celeborn.common.protocol.message.ControlMessages._
 import org.apache.celeborn.common.quota.{QuotaManager, ResourceConsumption}
 import org.apache.celeborn.common.rpc._
-import org.apache.celeborn.common.rpc.netty.NettyRpcEnv
 import org.apache.celeborn.common.util.{CelebornHadoopUtils, JavaUtils, PbSerDeUtils, ThreadUtils, Utils}
 import org.apache.celeborn.server.common.{HttpService, Service}
 import org.apache.celeborn.service.deploy.master.clustermeta.SingleMasterMetaManager
@@ -310,6 +309,13 @@ private[celeborn] class Master(
       executeWithLeaderChecker(
         null,
         handleRemoveWorkersUnavailableInfos(unavailableWorkers, pb.getRequestId))
+    case pb: PbReportFailure =>
+      val failureType = FailureType.fromValue(pb.getFailureType)
+      val appId = pb.getAppId
+      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
+      executeWithLeaderChecker(null, handleReportFailure(failureType, appId))
+    case pb: PbReportApplicationCounterMetrics =>
+      handleReportApplicationCounterMetrics(pb)
   }
 
   override def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
@@ -447,20 +453,36 @@ private[celeborn] class Master(
 
     case _: PbCheckWorkersAvailable =>
       executeWithLeaderChecker(context, handleCheckWorkersAvailable(context))
+  }
 
-    case pb: PbReportFailure =>
-      val failureType = FailureType.fromValue(pb.getFailureType)
-      val appId = pb.getAppId
-      logDebug(s"Received ReportFailure request, failureType=${failureType.name()}")
-      executeWithLeaderChecker(context, handleReportFailure(context, failureType, appId))
+  private def handleReportApplicationCounterMetrics(metrics: PbReportApplicationCounterMetrics)
+      : Unit = {
+    metrics.getMetricsName match {
+      case MasterSource.JOB_SUCCEEDED_COUNT =>
+        masterSource.incCounter(MasterSource.JOB_SUCCEEDED_COUNT, metrics.getValue)
+      case MasterSource.JOB_FAILED_CELEBORN_COUNT =>
+        masterSource.incCounter(MasterSource.JOB_FAILED_CELEBORN_COUNT, metrics.getValue)
+      case MasterSource.JOB_FAILED_OTHER_COUNT =>
+        masterSource.incCounter(MasterSource.JOB_FAILED_OTHER_COUNT, metrics.getValue)
+      case MasterSource.APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT =>
+        masterSource.incCounter(
+          MasterSource.APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT,
+          metrics.getValue)
+      case MasterSource.APPLICATION_SUCCEEDED_COUNT =>
+        masterSource.incCounter(MasterSource.APPLICATION_SUCCEEDED_COUNT, metrics.getValue)
+      case unknownMetricsName: String =>
+        logWarning(
+          s"Unknown application counter metric detected: $unknownMetricsName. " +
+            "Sending unknown metrics to the master could lead to increased memory usage.")
+        masterSource.addCounter(unknownMetricsName)
+        masterSource.incCounter(unknownMetricsName, metrics.getValue)
+    }
   }
 
   private def handleReportFailure(
-      context: RpcCallContext,
       failureType: FailureType,
       appId: String): Unit = {
     statusSystem.handleReportFailure(failureType, appId)
-    context.reply(PbReportFailureResponse.newBuilder().setSuccess(true).build())
   }
 
   private def timeoutDeadWorkers(): Unit = {

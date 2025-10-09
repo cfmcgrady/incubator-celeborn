@@ -71,6 +71,7 @@ license: |
 | celeborn.client.readLocalShuffleFile.threads | 4 | Threads count for read local shuffle file. | 0.3.1 |  | 
 | celeborn.client.registerShuffle.maxRetries | 3 | Max retry times for client to register shuffle. | 0.3.0 | celeborn.shuffle.register.maxRetries | 
 | celeborn.client.registerShuffle.retryWait | 3s | Wait time before next retry if register shuffle failed. | 0.3.0 | celeborn.shuffle.register.retryWait | 
+| celeborn.client.reportApplicationMetricsToMaster.enabled | true | Whether the client should report application metrics to the master. When enabled, only job and application failures caused by Celeborn counters are reported. | 0.4.1.4 |  | 
 | celeborn.client.requestCommitFiles.maxRetries | 4 | Max retry times for requestCommitFiles RPC. | 0.3.0 |  | 
 | celeborn.client.reserveSlots.maxRetries | 3 | Max retry times for client to reserve slots. | 0.3.0 | celeborn.slots.reserve.maxRetries | 
 | celeborn.client.reserveSlots.rackaware.enabled | false | Whether need to place different replicates on different racks when allocating slots. | 0.3.1 | celeborn.client.reserveSlots.rackware.enabled | 

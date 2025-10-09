@@ -32,6 +32,12 @@ class MasterSource(conf: CelebornConf) extends AbstractSource(conf, MetricsSyste
   addCounter(RPC_COUNT)
   addCounter(RPC_FAILED_COUNT)
 
+  addCounter(JOB_SUCCEEDED_COUNT)
+  addCounter(JOB_FAILED_OTHER_COUNT)
+  addCounter(JOB_FAILED_CELEBORN_COUNT)
+  addCounter(APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT)
+  addCounter(APPLICATION_SUCCEEDED_COUNT)
+
   private def addFailureTypeCounters(): Unit = {
     for (failureType <- FailureType.values) {
       if (failureType != FailureType.UNKNOWN) {
@@ -91,4 +97,10 @@ object MasterSource {
   val RPC_FAILED_COUNT = "RpcFailedCount"
 
   val APP_FAILED_COUNT = "AppFailedCount"
+
+  val APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT = "ApplicationHasCelebornFailureJobCount"
+  val APPLICATION_SUCCEEDED_COUNT = "ApplicationSucceededCount"
+  val JOB_FAILED_CELEBORN_COUNT = "JobFailedCelebornCount"
+  val JOB_FAILED_OTHER_COUNT = "JobFailedOtherCount"
+  val JOB_SUCCEEDED_COUNT = "JobSucceededCount"
 }
