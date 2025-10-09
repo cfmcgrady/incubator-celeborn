@@ -38,6 +38,7 @@ enum Type {
   RemoveWorkersUnavailableInfo = 23;
   WorkerExclude = 24;
   ReportFailure = 25;
+  ReportJobEnd = 26;
 }
 
 message ResourceRequest {

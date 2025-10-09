@@ -93,8 +93,10 @@ enum MessageType {
   GET_SHUFFLE_ID_RESPONSE = 70;
   SASL_REQUEST = 71;
   PUSH_MERGED_DATA_SPLIT_PARTITION_INFO = 91;
-  REPORT_FAILURE = 92;
-  REPORT_FAILURE_RESPONSE=93;
+
+  // Start internal message IDs at 1024 to simplify cherry-picking updates from the upstream project
+  REPORT_FAILURE = 1024;
+  REPORT_APPLICATION_COUNTER_METRICS = 1025;
 }
 
 enum StreamType {
@@ -348,8 +350,9 @@ message PbReportShuffleFetchFailureResponse {
   bool success = 1;
 }
 
-message PbReportFailureResponse {
-  bool success = 1;
+message PbReportApplicationCounterMetrics {
+  string metricsName = 1;
+  int32 value = 2;
 }
 
 message PbUnregisterShuffle {

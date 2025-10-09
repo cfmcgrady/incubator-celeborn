@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.protocol.RpcNameConstants;
-import org.apache.celeborn.common.protocol.message.ControlMessages.OneWayMessageResponse$;
 import org.apache.celeborn.common.protocol.message.MasterRequestMessage;
 import org.apache.celeborn.common.protocol.message.Message;
 import org.apache.celeborn.common.rpc.*;
@@ -95,42 +94,6 @@ public class MasterClient {
    */
   public static String genRequestId() {
     return encodeRequestId(UUID.randomUUID().toString(), nextCallId());
-  }
-
-  public void send(Message message) throws Throwable {
-    // Send a one-way message. Because we need to know whether the leader between Masters has
-    // switched, we must adopt a synchronous method, but for a one-way message, we don't care
-    // whether it can be sent successfully, so we adopt an asynchronous method. Therefore, we
-    // choose to use one Thread pool to use synchronization.
-    oneWayMessageSender.submit(
-        () -> {
-          try {
-            sendMessageInner(message, OneWayMessageResponse$.class);
-          } catch (Throwable e) {
-            LOG.warn("Exception occurs while send one-way message.", e);
-          }
-        });
-    LOG.debug("Send one-way message {}.", message);
-  }
-
-  public void send(GeneratedMessageV3 message) throws Throwable {
-    send(message, OneWayMessageResponse$.class);
-  }
-
-  public <T> void send(GeneratedMessageV3 message, Class<T> clz) throws Throwable {
-    // Send a one-way message. Because we need to know whether the leader between Masters has
-    // switched, we must adopt a synchronous method, but for a one-way message, we don't care
-    // whether it can be sent successfully, so we adopt an asynchronous method. Therefore, we
-    // choose to use one Thread pool to use synchronization.
-    oneWayMessageSender.submit(
-        () -> {
-          try {
-            sendMessageInner(message, clz);
-          } catch (Throwable e) {
-            LOG.warn("Exception occurs while send one-way message.", e);
-          }
-        });
-    LOG.debug("Send one-way message {}.", message);
   }
 
   public <T> T askSync(Message message, Class<T> clz) throws Throwable {
@@ -200,6 +163,66 @@ public class MasterClient {
       return true;
     }
     return false;
+  }
+
+  public void send(Message message) {
+    oneWayMessageSender.submit(
+        () -> {
+          try {
+            sendOneWayInner(message);
+          } catch (Throwable e) {
+            LOG.warn("Exception occurs while send one-way message.", e);
+          }
+        });
+    LOG.debug("Send one-way message {}.", message);
+  }
+
+  public void send(GeneratedMessageV3 message) {
+    oneWayMessageSender.submit(
+        () -> {
+          try {
+            sendOneWayInner(message);
+          } catch (Throwable e) {
+            LOG.warn("Exception occurs while send one-way message.", e);
+          }
+        });
+    LOG.debug("Send one-way message {}.", message);
+  }
+
+  /** One-way fire-and-forget send implementation. */
+  private void sendOneWayInner(Object message) throws Throwable {
+    Throwable throwable = null;
+    int numTries = 0;
+    boolean shouldRetry = true;
+
+    if (message instanceof MasterRequestMessage) {
+      ((MasterRequestMessage) message)
+          .requestId_(encodeRequestId(UUID.randomUUID().toString(), nextCallId()));
+    }
+
+    LOG.debug("Send one-way rpc message {}", message);
+    RpcEndpointRef endpointRef = null;
+    AtomicInteger currentMasterIdx = new AtomicInteger(0);
+
+    long sleepLimitTime = 2000; // 2s
+    while (numTries < maxRetries && shouldRetry) {
+      try {
+        endpointRef = getOrSetupRpcEndpointRef(currentMasterIdx);
+        endpointRef.send(message);
+        return;
+      } catch (Throwable e) {
+        throwable = e;
+        shouldRetry = shouldRetry(endpointRef, throwable);
+        if (shouldRetry) {
+          numTries++;
+          Uninterruptibles.sleepUninterruptibly(
+              Math.min(numTries * 100L, sleepLimitTime), TimeUnit.MILLISECONDS);
+        }
+      }
+    }
+    LOG.error(
+        "Send one-way rpc failed after {} tries, max try {}!", numTries, maxRetries, throwable);
+    throw throwable;
   }
 
   private void setRpcEndpointRef(String masterEndpoint) {

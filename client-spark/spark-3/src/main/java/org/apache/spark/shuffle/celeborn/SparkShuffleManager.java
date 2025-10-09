@@ -131,6 +131,16 @@ public class SparkShuffleManager implements ShuffleManager {
             lifecycleManager.registerShuffleTrackerCallback(
                 shuffleId -> SparkUtils.unregisterAllMapOutput(mapOutputTracker, shuffleId));
           }
+          if (celebornConf.clientReportApplicationMetricsToMasterEnabled()) {
+            assert SparkContext$.MODULE$.getActive().isDefined()
+                : "No active SparkContext found. Ensure that SparkContext is properly initialized "
+                    + "and has not been stopped before enabling application metrics reporting.";
+            SparkContext$.MODULE$
+                .getActive()
+                .get()
+                .listenerBus()
+                .addToEventLogQueue(new ApplicationMetricsTracker(lifecycleManager));
+          }
         }
       }
     }
