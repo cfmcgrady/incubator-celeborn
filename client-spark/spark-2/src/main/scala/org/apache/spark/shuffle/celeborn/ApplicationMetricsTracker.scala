@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.scheduler.{JobFailed, JobSucceeded, SparkListener, SparkListenerApplicationEnd, SparkListenerJobEnd}
-import org.apache.spark.shuffle.celeborn.ApplicationMetricsTracker.{causedByCeleborn, APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT, APPLICATION_SUCCEEDED_COUNT, JOB_FAILED_CELEBORN_COUNT, JOB_FAILED_OTHER_COUNT, JOB_SUCCEEDED_COUNT}
+import org.apache.spark.shuffle.celeborn.ApplicationMetricsTracker.{APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT, APPLICATION_SUCCEEDED_COUNT, JOB_FAILED_CELEBORN_COUNT, JOB_FAILED_OTHER_COUNT, JOB_SUCCEEDED_COUNT}
 
 import org.apache.celeborn.client.LifecycleManager
 import org.apache.celeborn.common.protocol.PbReportApplicationCounterMetrics
@@ -34,9 +34,9 @@ class ApplicationMetricsTracker(lifecycleManager: LifecycleManager) extends Spar
     logInfo(s"received event $jobEnd")
     val jobEndMetricsBuilder = PbReportApplicationCounterMetrics.newBuilder()
     jobEnd.jobResult match {
-      case JobFailed(exception) if causedByCeleborn(exception) =>
+      case JobFailed(exception) if ApplicationMetricsTracker.causedByCeleborn(exception) =>
         jobEndMetricsBuilder.setMetricsName(JOB_FAILED_CELEBORN_COUNT).setValue(1)
-        if (isReportedAppJobFailureToMaster.getAndSet(true)) {
+        if (!isReportedAppJobFailureToMaster.getAndSet(true)) {
           lifecycleManager.reportMasterApplicationCounterMetrics(
             PbReportApplicationCounterMetrics.newBuilder()
               .setMetricsName(APPLICATION_HAS_CELEBORN_FAILURE_JOB_COUNT)
