@@ -66,11 +66,16 @@ object Dependencies {
   val slf4jVersion = "1.7.36"
   val snakeyamlVersion = "2.2"
   val snappyVersion = "1.1.10.5"
+  val swaggerVersion = "2.2.1"
+  val swaggerUiVersion = "4.9.1"
+  val jerseyVersion = "2.39.1"
+  val jettyVersion = "9.4.52.v20230823"
+  val jakartaServeletApiVersion = "4.0.4"
 
   // Versions for proto
   val protocVersion = "3.21.7"
   val protoVersion = "3.21.7"
-  
+
   val commonsCompress = "org.apache.commons" % "commons-compress" % commonsCompressVersion
   val commonsCrypto = "org.apache.commons" % "commons-crypto" % commonsCryptoVersion excludeAll(
     ExclusionRule("net.java.dev.jna", "jna"))
@@ -126,6 +131,23 @@ object Dependencies {
   val snakeyaml = "org.yaml" % "snakeyaml" % snakeyamlVersion
   val snappyJava = "org.xerial.snappy" % "snappy-java" % snappyVersion
   val zstdJni = "com.github.luben" % "zstd-jni" % zstdJniVersion
+  val jettyServer = "org.eclipse.jetty" % "jetty-server" % jettyVersion excludeAll(
+    ExclusionRule("javax.servlet", "javax.servlet-api"))
+  val jettyServlet = "org.eclipse.jetty" % "jetty-servlet" % jettyVersion excludeAll(
+    ExclusionRule("javax.servlet", "javax.servlet-api"))
+  val jettyProxy = "org.eclipse.jetty" % "jetty-proxy" % jettyVersion
+  val jakartaServletApi = "jakarta.servlet" % "jakarta.servlet-api" % jakartaServeletApiVersion
+  val jerseyServer = "org.glassfish.jersey.core" % "jersey-server" % jerseyVersion excludeAll(
+    ExclusionRule("jakarta.xml.bind", "jakarta.xml.bind-api"))
+  val jerseyContainerServletCore = "org.glassfish.jersey.containers" % "jersey-container-servlet-core" % jerseyVersion
+  val jerseyHk2 = "org.glassfish.jersey.inject" % "jersey-hk2" % jerseyVersion
+  val jerseyMediaJsonJackson = "org.glassfish.jersey.media" % "jersey-media-json-jackson" % jerseyVersion
+  val jerseyMediaMultipart = "org.glassfish.jersey.media" % "jersey-media-multipart" % jerseyVersion
+  val swaggerJaxrs2 = "io.swagger.core.v3" % "swagger-jaxrs2" %swaggerVersion excludeAll(
+    ExclusionRule("com.sun.activation", "jakarta.activation"),
+    ExclusionRule("org.javassist", "javassist"),
+    ExclusionRule("jakarta.activation", "jakarta.activation-api"))
+  val swaggerUi = "org.webjars" % "swagger-ui" % swaggerUiVersion
 
   // Test dependencies
   // https://www.scala-sbt.org/1.x/docs/Testing.html
@@ -135,6 +157,10 @@ object Dependencies {
   val mockitoInline = "org.mockito" % "mockito-inline" % mockitoVersion
   val scalatestMockito = "org.mockito" %% "mockito-scala-scalatest" % scalatestMockitoVersion
   val scalatest = "org.scalatest" %% "scalatest" % scalatestVersion
+  val jerseyTestFrameworkCore = "org.glassfish.jersey.test-framework" % "jersey-test-framework-core" % jerseyVersion
+  val jerseyTestFrameworkProviderJetty = "org.glassfish.jersey.test-framework.providers" % "jersey-test-framework-provider-jetty" % jerseyVersion excludeAll(
+    ExclusionRule("org.eclipse.jetty", "jetty-util"),
+    ExclusionRule("org.eclipse.jetty", "jetty-continuation"))
 }
 
 object CelebornCommonSettings {
@@ -155,7 +181,7 @@ object CelebornCommonSettings {
   scalaVersion := projectScalaVersion
 
   autoScalaLibrary := false
-  
+
   // crossScalaVersions must be set to Nil on the root project
   crossScalaVersions := Nil
 
@@ -171,7 +197,7 @@ object CelebornCommonSettings {
       "Build-Revision" -> gitHeadCommit.value.getOrElse("N/A"),
       "Build-Branch" -> gitCurrentBranch.value,
       "Build-Time" -> java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ISO_DATE_TIME)),
-  
+
     // -target cannot be passed as a parameter to javadoc. See https://github.com/sbt/sbt/issues/355
     Compile / compile / javacOptions ++= Seq("-target", "1.8"),
 
@@ -202,7 +228,7 @@ object CelebornCommonSettings {
       "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED",
       "-Dio.netty.tryReflectionSetAccessible=true"
     ),
-  
+
     testOptions += Tests.Argument("-oF"),
 
     Test / testOptions += Tests.Argument("-oDF"),
@@ -290,7 +316,7 @@ object CelebornBuild extends sbt.internal.BuildDef {
       CelebornWorker.worker,
       CelebornMaster.master) ++ maybeSparkClientModules ++ maybeFlinkClientModules ++ maybeMRClientModules
   }
-  
+
   // ThisBuild / parallelExecution := false
 
   // scalaVersion := "2.11.12"
@@ -426,7 +452,7 @@ object CelebornCommon {
         Seq(file)
         // generate version task depends on PB generate to avoid concurrency generate source files
       }.dependsOn(Compile / PB.generate),
-  
+
       // a task to show current profiles
       printProfiles := {
         val message = profiles.mkString("", " ", "")
@@ -467,8 +493,21 @@ object CelebornService {
         Dependencies.javaxServletApi,
         Dependencies.commonsCrypto,
         Dependencies.slf4jApi,
+        Dependencies.swaggerJaxrs2,
+        Dependencies.swaggerUi,
+        Dependencies.jakartaServletApi,
+        Dependencies.jerseyServer,
+        Dependencies.jerseyContainerServletCore,
+        Dependencies.jerseyHk2,
+        Dependencies.jerseyMediaJsonJackson,
+        Dependencies.jerseyMediaMultipart,
+        Dependencies.jettyServer,
+        Dependencies.jettyServlet,
+        Dependencies.jettyProxy,
         Dependencies.log4jSlf4jImpl % "test",
-        Dependencies.log4j12Api % "test"
+        Dependencies.log4j12Api % "test",
+        Dependencies.jerseyTestFrameworkCore % "test",
+        Dependencies.jerseyTestFrameworkProviderJetty % "test"
       ) ++ commonUnitTestDependencies
     )
 }
@@ -518,7 +557,9 @@ object CelebornWorker {
         Dependencies.leveldbJniAll,
         Dependencies.roaringBitmap,
         Dependencies.rocksdbJni,
-        Dependencies.scalatestMockito % "test"
+        Dependencies.scalatestMockito % "test",
+        Dependencies.jerseyTestFrameworkCore % "test",
+        Dependencies.jerseyTestFrameworkProviderJetty % "test"
       ) ++ commonUnitTestDependencies
     )
 }
@@ -685,7 +726,7 @@ trait SparkClientProjects {
         ) ++ commonUnitTestDependencies
       )
   }
-  
+
   def sparkClient: Project = {
     Project(sparkClientProjectName, file(sparkClientProjectPath))
       .dependsOn(CelebornCommon.common, sparkCommon)
@@ -726,7 +767,9 @@ trait SparkClientProjects {
         libraryDependencies ++= Seq(
           "org.apache.spark" %% "spark-core" % sparkVersion % "test",
           "org.apache.spark" %% "spark-sql" % sparkVersion % "test",
-          "org.apache.spark" %% "spark-core" % sparkVersion % "test" classifier "tests",
+          "org.apache.spark" %% "spark-core" % sparkVersion % "test" classifier "tests" excludeAll(
+            ExclusionRule("org.glassfish.jersey.inject", "*"),
+            ExclusionRule("org.glassfish.jersey.core", "*")),
           "org.apache.spark" %% "spark-sql" % sparkVersion % "test" classifier "tests"
         ) ++ commonUnitTestDependencies
       )
@@ -750,14 +793,14 @@ trait SparkClientProjects {
           val extension = artifact.value.extension
           s"${moduleName.value}_${scalaBinaryVersion.value}-${version.value}.$extension"
         },
-  
+
         (assembly / test) := { },
-  
+
         (assembly / logLevel) := Level.Info,
-  
+
         // Exclude `scala-library` from assembly.
         (assembly / assemblyPackageScala / assembleArtifact) := false,
-  
+
         (assembly / assemblyExcludedJars) := {
           val cp = (assembly / fullClasspath).value
           cp filter { v =>
@@ -772,7 +815,7 @@ trait SparkClientProjects {
               name.startsWith("RoaringBitmap-"))
           }
         },
-  
+
         (assembly / assemblyShadeRules) := Seq(
           ShadeRule.rename("com.codahale.metrics.**" -> "org.apache.celeborn.shaded.com.codahale.metrics.@1").inAll,
           ShadeRule.rename("com.google.protobuf.**" -> "org.apache.celeborn.shaded.com.google.protobuf.@1").inAll,
@@ -781,7 +824,7 @@ trait SparkClientProjects {
           ShadeRule.rename("org.apache.commons.**" -> "org.apache.celeborn.shaded.org.apache.commons.@1").inAll,
           ShadeRule.rename("org.roaringbitmap.**" -> "org.apache.celeborn.shaded.org.roaringbitmap.@1").inAll
         ),
-  
+
         (assembly / assemblyMergeStrategy) := {
           case m if m.toLowerCase(Locale.ROOT).endsWith("manifest.mf") => MergeStrategy.discard
           // the LicenseAndNoticeMergeStrategy always picks the license/notice file from the current project
@@ -955,12 +998,12 @@ trait FlinkClientProjects {
             val artifactValue: Artifact = artifact.value
             flinkClientShadeJarName(revision, artifactValue, scalaBinaryVersion.value)
         },
-  
+
         (assembly / logLevel) := Level.Info,
-  
+
         // Exclude `scala-library` from assembly.
         (assembly / assemblyPackageScala / assembleArtifact) := false,
-  
+
         (assembly / assemblyExcludedJars) := {
           val cp = (assembly / fullClasspath).value
           cp filter { v =>
@@ -974,7 +1017,7 @@ trait FlinkClientProjects {
                 name.startsWith("RoaringBitmap-"))
           }
         },
-  
+
         (assembly / assemblyShadeRules) := Seq(
           ShadeRule.rename("com.google.protobuf.**" -> "org.apache.celeborn.shaded.com.google.protobuf.@1").inAll,
           ShadeRule.rename("com.google.common.**" -> "org.apache.celeborn.shaded.com.google.common.@1").inAll,
@@ -982,7 +1025,7 @@ trait FlinkClientProjects {
           ShadeRule.rename("org.apache.commons.**" -> "org.apache.celeborn.shaded.org.apache.commons.@1").inAll,
           ShadeRule.rename("org.roaringbitmap.**" -> "org.apache.celeborn.shaded.org.roaringbitmap.@1").inAll
         ),
-  
+
         (assembly / assemblyMergeStrategy) := {
           case m if m.toLowerCase(Locale.ROOT).endsWith("manifest.mf") => MergeStrategy.discard
           // the LicenseAndNoticeMergeStrategy always picks the license/notice file from the current project
