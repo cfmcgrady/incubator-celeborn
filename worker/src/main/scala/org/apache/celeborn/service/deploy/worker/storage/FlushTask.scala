@@ -31,12 +31,22 @@ abstract private[worker] class FlushTask(
 private[worker] class LocalFlushTask(
     buffer: CompositeByteBuf,
     fileChannel: FileChannel,
-    notifier: FlushNotifier) extends FlushTask(buffer, notifier) {
+    notifier: FlushNotifier,
+    gatherApiEnabled: Boolean) extends FlushTask(buffer, notifier) {
   override def flush(): Unit = {
-    val buffers = buffer.nioBuffers()
-    for (buffer <- buffers) {
-      while (buffer.hasRemaining) {
-        fileChannel.write(buffer)
+    if (gatherApiEnabled) {
+      val buffers = buffer.nioBuffers()
+      val readableBytes = buffer.readableBytes()
+      var written = 0L
+      do {
+        written = fileChannel.write(buffers) + written
+      } while (written != readableBytes)
+    } else {
+      val buffers = buffer.consolidate().nioBuffers()
+      for (buffer <- buffers) {
+        while (buffer.hasRemaining) {
+          fileChannel.write(buffer)
+        }
       }
     }
   }
