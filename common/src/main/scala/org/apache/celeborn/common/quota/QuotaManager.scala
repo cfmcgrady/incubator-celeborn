@@ -21,12 +21,16 @@ import java.util.concurrent.ConcurrentHashMap
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.identity.UserIdentifier
 import org.apache.celeborn.common.internal.Logging
+import org.apache.celeborn.common.protocol.message.ControlMessages.CheckQuotaResponse
 import org.apache.celeborn.common.util.JavaUtils
 
 abstract class QuotaManager(conf: CelebornConf) extends Logging {
+  private val appQuotaEnabled = conf.appQuotaEnabled
 
   val userQuotas: ConcurrentHashMap[UserIdentifier, Quota] =
     JavaUtils.newConcurrentHashMap[UserIdentifier, Quota]()
+
+  val appQuotaStatus: ConcurrentHashMap[String, QuotaStatus] = JavaUtils.newConcurrentHashMap()
 
   /**
    * Initialize user quota settings.
@@ -36,17 +40,39 @@ abstract class QuotaManager(conf: CelebornConf) extends Logging {
   /**
    * Method to refresh current user quota setting.
    */
-  def refresh(): Unit
+  def refresh(workerResources: Iterator[(UserIdentifier, ResourceConsumption)]): Unit
 
   def getQuota(userIdentifier: UserIdentifier): Quota = {
     userQuotas.getOrDefault(userIdentifier, Quota())
+  }
+
+  def handleAppLost(appId: String): Unit = {
+    appQuotaStatus.remove(appId)
+  }
+
+  def checkApplicationQuotaStatus(applicationId: String): CheckQuotaResponse = {
+    if (!appQuotaEnabled) {
+      return CheckQuotaResponse(true, QuotaStatus.NORMAL)
+    }
+    val status = appQuotaStatus.getOrDefault(applicationId, QuotaStatus())
+    if (status.exceed) {
+      logInfo(s"application $applicationId quota exceeded, detail: ${status.exceedReason}")
+    }
+    CheckQuotaResponse(!status.exceed, status.exceedReason)
+  }
+
+  protected def checkConsumptionExceeded(used: ResourceConsumption, threshold: Quota): Boolean = {
+    used.diskBytesWritten >= threshold.diskBytesWritten ||
+    used.diskFileCount >= threshold.diskFileCount ||
+    used.hdfsBytesWritten >= threshold.hdfsBytesWritten ||
+    used.hdfsFileCount >= threshold.hdfsFileCount
   }
 }
 
 object QuotaManager extends Logging {
   def instantiate(conf: CelebornConf): QuotaManager = {
     val className = conf.quotaManagerClass
-    logDebug(s"Creating quota manager $className")
+    logInfo(s"Creating quota manager $className")
     val clazz = Class.forName(
       className,
       true,
