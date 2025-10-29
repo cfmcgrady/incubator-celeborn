@@ -103,4 +103,5 @@ object MasterSource {
   val JOB_FAILED_CELEBORN_COUNT = "JobFailedCelebornCount"
   val JOB_FAILED_OTHER_COUNT = "JobFailedOtherCount"
   val JOB_SUCCEEDED_COUNT = "JobSucceededCount"
+  val JOB_EXCEED_QUOTA_COUNT = "JobExceedQuotaCount"
 }

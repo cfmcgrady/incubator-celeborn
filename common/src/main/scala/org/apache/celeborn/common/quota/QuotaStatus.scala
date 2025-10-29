@@ -14,25 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.celeborn.common.quota
 
-package org.apache.celeborn.common.metrics.source
+import QuotaStatus._
 
-import org.apache.celeborn.common.CelebornConf
-import org.apache.celeborn.common.internal.Logging
+case class QuotaStatus(exceed: Boolean = false, exceedReason: String = NORMAL)
 
-class ResourceConsumptionSource(conf: CelebornConf, role: String)
-  extends AbstractSource(conf, role) with Logging {
-  override val sourceName = "ResourceConsumption"
-}
-
-object ResourceConsumptionSource {
-  val DISK_FILE_COUNT = "diskFileCount"
-
-  val DISK_BYTES_WRITTEN = "diskBytesWritten"
-
-  val HDFS_FILE_COUNT = "hdfsFileCount"
-
-  val HDFS_BYTES_WRITTEN = "hdfsBytesWritten"
-
-  val APPLICATION_LABEL = "applicationId"
+object QuotaStatus {
+  val NORMAL: String = ""
+  val APP_EXHAUSTED: String =
+    "Interrupt application caused by the app storage usage reach threshold."
 }

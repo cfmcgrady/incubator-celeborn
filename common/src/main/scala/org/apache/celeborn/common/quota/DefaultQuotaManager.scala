@@ -29,7 +29,7 @@ import org.apache.celeborn.common.util.Utils
 
 class DefaultQuotaManager(conf: CelebornConf) extends QuotaManager(conf) {
 
-  override def refresh(): Unit = {
+  override def refresh(workerResources: Iterator[(UserIdentifier, ResourceConsumption)]): Unit = {
     // Not support refresh
   }
 

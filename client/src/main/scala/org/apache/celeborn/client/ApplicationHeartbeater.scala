@@ -24,7 +24,7 @@ import scala.collection.JavaConverters._
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.internal.Logging
-import org.apache.celeborn.common.protocol.message.ControlMessages.{ApplicationLost, ApplicationLostResponse, HeartbeatFromApplication, HeartbeatFromApplicationResponse, ZERO_UUID}
+import org.apache.celeborn.common.protocol.message.ControlMessages.{ApplicationLost, ApplicationLostResponse, CheckQuotaResponse, HeartbeatFromApplication, HeartbeatFromApplicationResponse, ZERO_UUID}
 import org.apache.celeborn.common.protocol.message.StatusCode
 import org.apache.celeborn.common.util.{ThreadUtils, Utils}
 
@@ -33,13 +33,15 @@ class ApplicationHeartbeater(
     conf: CelebornConf,
     masterClient: MasterClient,
     shuffleMetrics: () => (Long, Long),
-    workerStatusTracker: WorkerStatusTracker) extends Logging {
+    workerStatusTracker: WorkerStatusTracker,
+    cancelAllActiveStages: String => Unit) extends Logging {
 
   private var stopped = false
 
   // Use independent app heartbeat threads to avoid being blocked by other operations.
   private val appHeartbeatIntervalMs = conf.appHeartbeatIntervalMs
   private val applicationUnregisterEnabled = conf.applicationUnregisterEnabled
+  private val appQuotaEnabled = conf.appQuotaEnabled
   private val appHeartbeatHandlerThread =
     ThreadUtils.newDaemonSingleThreadScheduledExecutor(
       "celeborn-client-lifecycle-manager-app-heartbeater")
@@ -66,6 +68,7 @@ class ApplicationHeartbeater(
             if (response.statusCode == StatusCode.SUCCESS) {
               logDebug("Successfully send app heartbeat.")
               workerStatusTracker.handleHeartbeatResponse(response)
+              checkQuotaExceeds(response.checkQuotaResponse)
             }
           } catch {
             case it: InterruptedException =>
@@ -95,7 +98,8 @@ class ApplicationHeartbeater(
           StatusCode.REQUEST_FAILED,
           List.empty.asJava,
           List.empty.asJava,
-          List.empty.asJava)
+          List.empty.asJava,
+          CheckQuotaResponse(isAvailable = true, ""))
     }
   }
 
@@ -109,6 +113,14 @@ class ApplicationHeartbeater(
     } catch {
       case e: Exception =>
         logWarning("AskSync unRegisterApplication failed.", e)
+    }
+  }
+
+  private def checkQuotaExceeds(response: CheckQuotaResponse): Unit = {
+    if (appQuotaEnabled && !response.isAvailable) {
+      logWarning(s"Client check quota response: enabled: $appQuotaEnabled," +
+        s"isAvailable=${response.isAvailable}, reason=${response.reason}")
+      cancelAllActiveStages(response.reason)
     }
   }
 
