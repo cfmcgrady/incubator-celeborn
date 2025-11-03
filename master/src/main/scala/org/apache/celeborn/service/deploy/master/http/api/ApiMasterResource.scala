@@ -109,4 +109,25 @@ class ApiMasterResource extends ApiRequestContext {
       @QueryParam("REMOVE") removeWorkers: String): String = {
     httpService.exclude(normalizeParam(addWorkers), normalizeParam(removeWorkers))
   }
+
+  @Path("/quota/exceedQuotaApps")
+  @ApiResponse(
+    responseCode = "200",
+    content = Array(new Content(
+      mediaType = MediaType.TEXT_PLAIN)),
+    description = "List all exceed quota app ids of the master.")
+  @GET
+  def exceedQuotaApps: String = httpService.getExceedQuotaApps
+
+  @Path("/quota/removeQuotaApp")
+  @ApiResponse(
+    responseCode = "200",
+    content = Array(new Content(
+      mediaType = MediaType.TEXT_PLAIN)),
+    description = "Remove specific app from exceed quota map.")
+  @POST
+  def removeQuotaApp(
+      @QueryParam("APPID") appId: String): String = {
+    httpService.removeQuotaApp(normalizeParam(appId))
+  }
 }

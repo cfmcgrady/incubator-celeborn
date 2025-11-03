@@ -767,6 +767,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def quotaUserSpecificTenant: String = get(QUOTA_USER_SPECIFIC_TENANT)
   def quotaUserSpecificUserName: String = get(QUOTA_USER_SPECIFIC_USERNAME)
   def appQuotaEnabled: Boolean = get(APP_QUOTA_ENABLED)
+  def appQuotaClientEnabled: Boolean = get(APP_QUOTA_CLIENT_ENABLED)
   def quotaAppDiskBytesWritten: Long = get(QUOTA_APP_DISK_BYTES_WRITTEN)
   def quotaAppDiskFileCount: Long = get(QUOTA_APP_DISK_FILE_COUNT)
   def quotaAppHdfsBytesWritten: Long = get(QUOTA_APP_HDFS_BYTES_WRITTEN)
@@ -4322,6 +4323,14 @@ object CelebornConf extends Logging {
       .version("0.4.1")
       .booleanConf
       .createWithDefault(false)
+
+  val APP_QUOTA_CLIENT_ENABLED: ConfigEntry[Boolean] =
+    buildConf("celeborn.quota.app.client.enabled")
+      .categories("quota", "client")
+      .doc(s"Whether to enable app-level quota.")
+      .version("0.4.2.2")
+      .booleanConf
+      .createWithDefault(true)
 
   val QUOTA_APP_DISK_BYTES_WRITTEN: ConfigEntry[Long] =
     buildConf("celeborn.quota.app.diskBytesWritten")
