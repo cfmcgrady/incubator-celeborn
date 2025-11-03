@@ -1093,6 +1093,12 @@ object ControlMessages extends Logging {
         val pbHeartbeatFromApplicationResponse =
           PbHeartbeatFromApplicationResponse.parseFrom(message.getPayload)
         val pbCheckQuotaResponse = pbHeartbeatFromApplicationResponse.getCheckQuotaResponse
+        val isAvailable =
+          if (pbCheckQuotaResponse.hasAvailable) {
+            pbCheckQuotaResponse.getAvailable
+          } else {
+            true
+          }
         HeartbeatFromApplicationResponse(
           Utils.toStatusCode(pbHeartbeatFromApplicationResponse.getStatus),
           pbHeartbeatFromApplicationResponse.getExcludedWorkersList.asScala
@@ -1101,7 +1107,7 @@ object ControlMessages extends Logging {
             .map(PbSerDeUtils.fromPbWorkerInfo).toList.asJava,
           pbHeartbeatFromApplicationResponse.getShuttingWorkersList.asScala
             .map(PbSerDeUtils.fromPbWorkerInfo).toList.asJava,
-          CheckQuotaResponse(pbCheckQuotaResponse.getAvailable, pbCheckQuotaResponse.getReason))
+          CheckQuotaResponse(isAvailable, pbCheckQuotaResponse.getReason))
 
       case CHECK_QUOTA_VALUE =>
         val pbCheckAvailable = PbCheckQuota.parseFrom(message.getPayload)
@@ -1110,9 +1116,13 @@ object ControlMessages extends Logging {
       case CHECK_QUOTA_RESPONSE_VALUE =>
         val pbCheckAvailableResponse = PbCheckQuotaResponse
           .parseFrom(message.getPayload)
-        CheckQuotaResponse(
-          pbCheckAvailableResponse.getAvailable,
-          pbCheckAvailableResponse.getReason)
+        if (pbCheckAvailableResponse.hasAvailable) {
+          CheckQuotaResponse(
+            pbCheckAvailableResponse.getAvailable,
+            pbCheckAvailableResponse.getReason)
+        } else {
+          CheckQuotaResponse(true, "")
+        }
 
       case REPORT_WORKER_FAILURE_VALUE =>
         val pbReportWorkerUnavailable = PbReportWorkerUnavailable.parseFrom(message.getPayload)

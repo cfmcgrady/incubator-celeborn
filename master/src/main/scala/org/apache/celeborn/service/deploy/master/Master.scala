@@ -1147,6 +1147,40 @@ private[celeborn] class Master(
     sb.toString()
   }
 
+  override def getExceedQuotaApps: String = {
+    val sb = new StringBuilder
+    sb.append("================= Exceed Quota App ======================\n")
+    quotaManager.appQuotaStatus.asScala.toSeq.foreach { case (appId, reason) =>
+      sb.append(s"$appId:$reason\n")
+    }
+    sb.toString()
+  }
+
+  override def removeQuotaApp(appId: String): String = {
+    logInfo(s"Removing app: $appId in exceed quota map.")
+    val sb = new StringBuilder
+    sb.append("================= Remove Exceed Quota App ======================\n")
+    appId match {
+      case "ALL_APP" =>
+        val appIds = quotaManager.appQuotaStatus.keySet.asScala
+        appIds.foreach { id =>
+          appendResult(sb, id, true)
+        }
+        quotaManager.appQuotaStatus.clear()
+
+      case id =>
+        val removedValue = quotaManager.appQuotaStatus.remove(id)
+        appendResult(sb, id, removed = removedValue != null)
+    }
+    sb.toString()
+  }
+
+  private def appendResult(sb: StringBuilder, appId: String, removed: Boolean): Unit = {
+    val msg =
+      if (removed) s"Removed app $appId SUCCESS." else s"App $appId not in quota exceed list."
+    sb.append(msg).append("\n")
+  }
+
   private def isMasterActive: Int = {
     // use int rather than bool for better monitoring on dashboard
     val isActive =

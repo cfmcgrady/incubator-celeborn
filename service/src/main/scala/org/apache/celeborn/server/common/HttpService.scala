@@ -65,6 +65,11 @@ abstract class HttpService extends Service with Logging {
   def exclude(addWorkers: String, removeWorkers: String): String =
     throw new UnsupportedOperationException()
 
+  def getExceedQuotaApps: String = throw new UnsupportedOperationException()
+
+  def removeQuotaApp(appId: String): String =
+    throw new UnsupportedOperationException()
+
   def listPartitionLocationInfo: String = throw new UnsupportedOperationException()
 
   def getUnavailablePeers: String = throw new UnsupportedOperationException()
