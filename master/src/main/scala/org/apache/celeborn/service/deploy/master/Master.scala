@@ -125,6 +125,8 @@ private[celeborn] class Master(
 
   private val quotaManager = QuotaManager.instantiate(conf)
   private val masterResourceConsumptionInterval = conf.masterResourceConsumptionInterval
+  private val appLevelMetricsEnabled =
+    conf.masterAppLevelResourceConsumptionMetricsEnabled
   private val userResourceConsumptions =
     JavaUtils.newConcurrentHashMap[UserIdentifier, (ResourceConsumption, Long)]()
 
@@ -949,9 +951,11 @@ private[celeborn] class Master(
   private def handleResourceConsumption(userIdentifier: UserIdentifier): ResourceConsumption = {
     val userResourceConsumption = computeUserResourceConsumption(userIdentifier)
     gaugeResourceConsumption(userIdentifier)
-    val subResourceConsumptions = userResourceConsumption.subResourceConsumptions
-    if (CollectionUtils.isNotEmpty(subResourceConsumptions)) {
-      subResourceConsumptions.asScala.keys.foreach { gaugeResourceConsumption(userIdentifier, _) }
+    if (appLevelMetricsEnabled) {
+      val subResourceConsumptions = userResourceConsumption.subResourceConsumptions
+      if (CollectionUtils.isNotEmpty(subResourceConsumptions)) {
+        subResourceConsumptions.asScala.keys.foreach { gaugeResourceConsumption(userIdentifier, _) }
+      }
     }
     userResourceConsumption
   }
@@ -988,7 +992,8 @@ private[celeborn] class Master(
       userIdentifier: UserIdentifier,
       applicationId: String = null): ResourceConsumption = {
     val newResourceConsumption = computeUserResourceConsumption(userIdentifier)
-    if (applicationId == null) {
+    if (applicationId == null
+      || !newResourceConsumption.subResourceConsumptions.containsKey(applicationId)) {
       val current = System.currentTimeMillis()
       if (userResourceConsumptions.containsKey(userIdentifier)) {
         val resourceConsumptionAndUpdateTime = userResourceConsumptions.get(userIdentifier)

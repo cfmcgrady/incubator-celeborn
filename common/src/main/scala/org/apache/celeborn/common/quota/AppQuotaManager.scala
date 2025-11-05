@@ -40,16 +40,28 @@ class AppQuotaManager(conf: CelebornConf) extends QuotaManager(conf) {
       }
     }
 
-    appAggregated.foreach { case (appId, consumption) =>
-      if (checkConsumptionExceeded(consumption, quotaThreshold)) {
-        appQuotaStatus.put(
-          appId,
-          QuotaStatus(
-            exceed = true,
-            s"$expireReason Used: ${consumption.simpleString}, Threshold: $quotaThreshold."))
-      } else {
+    val exceededQuotaAppInfoMap = appAggregated.collect {
+      case (appId, consumption) if checkConsumptionExceeded(consumption, quotaThreshold) =>
+        appId -> QuotaStatus(
+          exceed = true,
+          s"$expireReason Used: ${consumption.simpleString}, Threshold: $quotaThreshold.")
+    }.toMap
+
+    // 清理过期的配额状态：移除已终止或者已不再超过配额的appId
+    // 主备master的appQuotaStatus独立更新，需要确保过期数据被及时清理
+    // 通过遍历当前状态集合并移除过期的appId，保证数据一致，且内存健康
+    // 注：考虑到appQuotaStatus仅记录超配额的app，数据量有限，遍历的性能开销可接受
+    val validAppIds = exceededQuotaAppInfoMap.keySet
+    val iterator = appQuotaStatus.keySet().iterator()
+    while (iterator.hasNext) {
+      val appId = iterator.next()
+      if (!validAppIds.contains(appId)) {
         appQuotaStatus.remove(appId)
       }
+    }
+
+    exceededQuotaAppInfoMap.foreach { case (appId, status) =>
+      appQuotaStatus.put(appId, status)
     }
   }
 }
