@@ -34,7 +34,6 @@ import org.apache.celeborn.common.protocol._
 import org.apache.celeborn.common.protocol.StorageInfo.Type
 import org.apache.celeborn.common.protocol.StorageInfo.Type.{HDD, SSD}
 import org.apache.celeborn.common.quota.AppQuotaManager
-import org.apache.celeborn.common.quota.DefaultQuotaManager
 import org.apache.celeborn.common.rpc.RpcTimeout
 import org.apache.celeborn.common.util.{JavaUtils, Utils}
 
@@ -772,6 +771,8 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def quotaAppDiskFileCount: Long = get(QUOTA_APP_DISK_FILE_COUNT)
   def quotaAppHdfsBytesWritten: Long = get(QUOTA_APP_HDFS_BYTES_WRITTEN)
   def quotaAppHdfsFileCount: Long = get(QUOTA_APP_HDFS_FILE_COUNT)
+  def masterAppLevelResourceConsumptionMetricsEnabled: Boolean =
+    get(MASTER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED)
 
   // //////////////////////////////////////////////////////
   //                      Client                         //
@@ -4301,10 +4302,10 @@ object CelebornConf extends Logging {
   val QUOTA_MANAGER: ConfigEntry[String] =
     buildConf("celeborn.quota.manager")
       .categories("quota")
-      .doc(s"QuotaManger class name. Default class is `${classOf[DefaultQuotaManager].getName}`.")
+      .doc(s"QuotaManger class name. Default class is `${classOf[AppQuotaManager].getName}`.")
       .version("0.2.0")
       .stringConf
-      .createWithDefault(classOf[DefaultQuotaManager].getName)
+      .createWithDefault(classOf[AppQuotaManager].getName)
 
   val QUOTA_CONFIGURATION_PATH: OptionalConfigEntry[String] =
     buildConf("celeborn.quota.configuration.path")
@@ -4363,6 +4364,14 @@ object CelebornConf extends Logging {
       .version("0.4.1")
       .longConf
       .createWithDefault(Long.MaxValue)
+
+  val MASTER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED: ConfigEntry[Boolean] =
+    buildConf("celeborn.master.appLevelResourceConsumption.metrics.enabled")
+      .categories("master")
+      .doc("Whether to enable app level resource consumption metrics.")
+      .version("0.4.2.2")
+      .booleanConf
+      .createWithDefault(false)
 
   val COLUMNAR_SHUFFLE_ENABLED: ConfigEntry[Boolean] =
     buildConf("celeborn.columnarShuffle.enabled")
