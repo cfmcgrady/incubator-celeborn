@@ -157,6 +157,22 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+          - name: CELEBORN_LOCAL_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+      - name: spark-agent
+        image: docker-reg.devops.xiaohongshu.com/kubernetes/spark-agent:spark-agent-7b1a54d7
+        volumeMounts:
+        - name: celeborn-worker
+          mountPath: /data/celeborn
+        resources:
+          limits:
+            cpu: 200m
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
       terminationGracePeriodSeconds: 86400
       volumes:
         - configMap:
