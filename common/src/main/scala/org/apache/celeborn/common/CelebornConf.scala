@@ -773,6 +773,8 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def quotaAppHdfsFileCount: Long = get(QUOTA_APP_HDFS_FILE_COUNT)
   def masterAppLevelResourceConsumptionMetricsEnabled: Boolean =
     get(MASTER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED)
+  def workerAppLevelResourceConsumptionMetricsEnabled: Boolean =
+    get(WORKER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED)
 
   // //////////////////////////////////////////////////////
   //                      Client                         //
@@ -4370,6 +4372,14 @@ object CelebornConf extends Logging {
       .categories("master")
       .doc("Whether to enable app level resource consumption metrics.")
       .version("0.4.2.2")
+      .booleanConf
+      .createWithDefault(false)
+
+  val WORKER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED: ConfigEntry[Boolean] =
+    buildConf("celeborn.worker.appLevelResourceConsumption.metrics.enabled")
+      .categories("worker")
+      .doc("Whether to enable app level resource consumption metrics for worker.")
+      .version("0.4.2.4")
       .booleanConf
       .createWithDefault(false)
 
