@@ -568,15 +568,21 @@ private[celeborn] class Worker(
     throw new CelebornException("Register worker failed.", exception)
   }
 
+  private val metricsAppLevelEnabled = conf.metricsWorkerAppLevelEnabled
+
   private def handleResourceConsumption(): util.Map[UserIdentifier, ResourceConsumption] = {
     val resourceConsumptionSnapshot = storageManager.userResourceConsumptionSnapshot()
     val userResourceConsumptions =
       workerInfo.updateThenGetUserResourceConsumption(resourceConsumptionSnapshot.asJava)
     resourceConsumptionSnapshot.foreach { case (userIdentifier, userResourceConsumption) =>
       gaugeResourceConsumption(userIdentifier)
-      val subResourceConsumptions = userResourceConsumption.subResourceConsumptions
-      if (CollectionUtils.isNotEmpty(subResourceConsumptions)) {
-        subResourceConsumptions.asScala.keys.foreach { gaugeResourceConsumption(userIdentifier, _) }
+      if (metricsAppLevelEnabled) {
+        val subResourceConsumptions = userResourceConsumption.subResourceConsumptions
+        if (CollectionUtils.isNotEmpty(subResourceConsumptions)) {
+          subResourceConsumptions.asScala.keys.foreach {
+            gaugeResourceConsumption(userIdentifier, _)
+          }
+        }
       }
     }
     userResourceConsumptions
