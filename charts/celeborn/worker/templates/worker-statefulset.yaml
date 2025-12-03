@@ -162,7 +162,7 @@ spec:
               fieldRef:
                 fieldPath: status.podIP
       - name: spark-agent
-        image: docker-reg.devops.xiaohongshu.com/kubernetes/spark-agent:spark-agent-7b1a54d7
+        image: artifactory.devops.xiaohongshu.com/dataops/spark-agent:spark-agent-440f9abb
         volumeMounts:
         - name: celeborn-worker
           mountPath: /data/celeborn
