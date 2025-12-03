@@ -754,6 +754,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def metricsWorkerForceAppendPauseSpentTimeThreshold: Int =
     get(METRICS_WORKER_PAUSE_SPENT_TIME_FORCE_APPEND_THRESHOLD)
   def metricsJsonPrettyEnabled: Boolean = get(METRICS_JSON_PRETTY_ENABLED)
+  def metricsWorkerAppLevelEnabled: Boolean = get(METRICS_WORKER_APP_LEVEL_ENABLED)
   def metricsWorkerReportHistogramIntervalMs: Long = get(METRICS_WORKER_REPORT_HISTOGRAM_INTERVAL)
 
   // //////////////////////////////////////////////////////
@@ -773,8 +774,6 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def quotaAppHdfsFileCount: Long = get(QUOTA_APP_HDFS_FILE_COUNT)
   def masterAppLevelResourceConsumptionMetricsEnabled: Boolean =
     get(MASTER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED)
-  def workerAppLevelResourceConsumptionMetricsEnabled: Boolean =
-    get(WORKER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED)
 
   // //////////////////////////////////////////////////////
   //                      Client                         //
@@ -4255,6 +4254,16 @@ object CelebornConf extends Logging {
       .booleanConf
       .createWithDefault(true)
 
+  val METRICS_WORKER_APP_LEVEL_ENABLED: ConfigEntry[Boolean] =
+    buildConf("celeborn.metrics.worker.appLevel.enabled")
+      .categories("metrics")
+      .doc("When true, enable worker application level metrics. Note: applicationId is " +
+        "considered as a high cardinality label, be careful enabling it on metrics systems " +
+        "that are not optimized for high cardinality columns.")
+      .version("0.6.0")
+      .booleanConf
+      .createWithDefault(true)
+
   val METRICS_WORKER_REPORT_HISTOGRAM_INTERVAL: ConfigEntry[Long] =
     buildConf("celeborn.metrics.worker.reportHistogram.interval")
       .categories("metrics")
@@ -4372,14 +4381,6 @@ object CelebornConf extends Logging {
       .categories("master")
       .doc("Whether to enable app level resource consumption metrics.")
       .version("0.4.2.2")
-      .booleanConf
-      .createWithDefault(false)
-
-  val WORKER_APP_LEVEL_RESOURCE_CONSUMPTION_METRICS_ENABLED: ConfigEntry[Boolean] =
-    buildConf("celeborn.worker.appLevelResourceConsumption.metrics.enabled")
-      .categories("worker")
-      .doc("Whether to enable app level resource consumption metrics for worker.")
-      .version("0.4.2.4")
       .booleanConf
       .createWithDefault(false)
 
