@@ -24,6 +24,90 @@ fi
 
 . "${CELEBORN_HOME}/sbin/load-celeborn-env.sh"
 
+# Read master port configurations
+CELEBORN_DEFAULTS_CONF="${CELEBORN_CONF_DIR}/celeborn-defaults.conf"
+
+echo "Reading master port configurations from: $CELEBORN_DEFAULTS_CONF"
+
+# Check if master HA is enabled
+HA_ENABLED=$(read_config_value "$CELEBORN_DEFAULTS_CONF" "celeborn.master.ha.enabled" 2>/dev/null || echo "false")
+HA_ENABLED=$(echo "$HA_ENABLED" | tr '[:upper:]' '[:lower:]')
+
+echo "Master HA enabled: $HA_ENABLED"
+
+# Only perform port checking if HA is enabled
+if [ "$HA_ENABLED" = "true" ]; then
+  # Dynamically discover all master port configurations
+  echo "Discovering master node configurations..."
+  MASTER_PORT_CONFIGS_ARRAY=($(discover_master_node_configs "$CELEBORN_DEFAULTS_CONF"))
+
+  # Calculate the number of unique nodes based on discovered configurations
+  # Each node should have exactly 2 configurations: port and ratis.port
+  UNIQUE_NODE_COUNT=$((${#MASTER_PORT_CONFIGS_ARRAY[@]} / 2))
+
+  # Check if we have at least 3 master nodes configured
+  if [ $UNIQUE_NODE_COUNT -lt 3 ]; then
+    echo ""
+    echo "ERROR: Master cluster requires at least 3 nodes for high availability."
+    echo "Currently configured nodes: $UNIQUE_NODE_COUNT"
+    echo "Please configure at least 3 master nodes in $CELEBORN_DEFAULTS_CONF"
+    exit 1
+  fi
+
+  echo "Master cluster configuration validated: $UNIQUE_NODE_COUNT nodes configured"
+
+  # Check each master port configuration
+  FAILED_PORTS=""
+  for port_config in "${MASTER_PORT_CONFIGS_ARRAY[@]}"; do
+    port_value=$(read_config_value "$CELEBORN_DEFAULTS_CONF" "$port_config")
+
+    # Check if read_config_value succeeded
+    if [ $? -ne 0 ]; then
+      echo "ERROR: Failed to read configuration for $port_config"
+      exit 1
+    fi
+
+    echo "Checking $port_config: $port_value"
+    # Test port availability
+    if ! test_port_availability "$port_value"; then
+      echo "ERROR: $port_value is not available"
+      FAILED_PORTS="$FAILED_PORTS $port_config:$port_value"
+    fi
+  done
+
+  # Check if any ports failed
+  if [ -n "$FAILED_PORTS" ]; then
+    echo ""
+    echo "ERROR: The following master ports are not available:"
+    for failed_port in $FAILED_PORTS; do
+      echo "  - ${failed_port%:*}: ${failed_port#*:}"
+    done
+    echo "Master Start Fail, Please check the master port configuration"
+    exit 1
+  fi
+
+  echo "All master HA ports are available!"
+else
+  echo "Master HA is disabled, skipping HA port availability checks."
+fi
+
+echo "Checking master prometheus port configuration..."
+PROMETHEUS_PORT_CONFIG="celeborn.metrics.master.prometheus.port"
+prometheus_port_value=$(read_config_value "$CELEBORN_DEFAULTS_CONF" "$PROMETHEUS_PORT_CONFIG" 2>/dev/null)
+
+if [ $? -eq 0 ]; then
+  echo "Checking $PROMETHEUS_PORT_CONFIG: $prometheus_port_value"
+  if ! test_port_availability "$prometheus_port_value"; then
+    echo "ERROR: Master prometheus port $prometheus_port_value is not available"
+    echo "Master Start Fail, Please check the master prometheus port configuration"
+    exit 1
+  fi
+  echo "Master prometheus port is available!"
+else
+  echo "Master prometheus port is not configured, please check."
+  exit 1
+fi
+
 if [ "$CELEBORN_MASTER_MEMORY" = "" ]; then
   CELEBORN_MASTER_MEMORY="1g"
 fi

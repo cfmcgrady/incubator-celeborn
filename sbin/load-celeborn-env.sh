@@ -89,3 +89,96 @@ maybe_enable_jemalloc() {
 }
 maybe_enable_jemalloc
 
+# Function to read configuration from celeborn-defaults.conf
+read_config_value() {
+  local config_file="$1"
+  local config_key="$2"
+  
+  if [ -f "$config_file" ]; then
+    # Read the configuration value, handling comments and whitespace
+    local value=$(grep "^[[:space:]]*${config_key}[[:space:]]*" "$config_file" | head -1 | sed 's/^[[:space:]]*[^[:space:]]*[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^[[:space:]]*//')
+    if [ -n "$value" ]; then
+      echo "$value"
+      return 0
+    else
+      echo "$config_key is not configured in $config_file, please check!" >&2
+      return 1
+    fi
+  else
+    echo "Celeborn config file is not found, please check $config_file" >&2
+    return 1
+  fi
+}
+
+# Function to test if a port is available
+test_port_availability() {
+  local port="$1"
+  local host="${2:-localhost}"
+  
+  if [ "$port" = "0" ] || [ -z "$port" ]; then
+    echo "Port $port is set to 0 or empty, please check it."
+    return 1
+  fi
+  
+  # Test if port is already in use
+  if command -v netstat >/dev/null 2>&1; then
+    if netstat -ln 2>/dev/null | grep -q ":${port}[[:space:]]"; then
+      echo "WARNING: Port $port is already in use"
+      return 1
+    fi
+  elif command -v ss >/dev/null 2>&1; then
+    if ss -ln 2>/dev/null | grep -q ":${port}[[:space:]]"; then
+      echo "WARNING: Port $port is already in use"
+      return 1
+    fi
+  elif command -v lsof >/dev/null 2>&1; then
+    if lsof -i ":${port}" >/dev/null 2>&1; then
+      echo "WARNING: Port $port is already in use"
+      return 1
+    fi
+  else
+    echo "No port checking utility found (netstat, ss, or lsof), skipping port availability test"
+    return 0
+  fi
+  
+  echo "Port $port is available"
+  return 0
+}
+
+# Function to discover all master node configurations dynamically
+discover_master_node_configs() {
+  local config_file="$1"
+  local configs=()
+  
+  if [ -f "$config_file" ]; then
+    # Extract all celeborn.master.ha.node.X.port and celeborn.master.ha.node.X.ratis.port configurations
+    # Use grep to find all matching lines, then extract node numbers
+    local node_numbers=$(grep "^[[:space:]]*celeborn\.master\.ha\.node\.[0-9]\+\.\(port\|ratis\.port\)[[:space:]]" "$config_file" | \
+      sed 's/^[[:space:]]*celeborn\.master\.ha\.node\.\([0-9]\+\)\..*$/\1/' | \
+      sort -n | uniq)
+    
+    # Build the configuration array for each discovered node
+    for node_num in $node_numbers; do
+      # Check if both port and ratis.port exist for this node
+      local port_config="celeborn.master.ha.node.${node_num}.port"
+      local ratis_port_config="celeborn.master.ha.node.${node_num}.ratis.port"
+      
+      # Check if port configuration exists
+      if grep -q "^[[:space:]]*${port_config}[[:space:]]" "$config_file"; then
+        configs+=("$port_config")
+      fi
+      
+      # Check if ratis.port configuration exists
+      if grep -q "^[[:space:]]*${ratis_port_config}[[:space:]]" "$config_file"; then
+        configs+=("$ratis_port_config")
+      fi
+    done
+  else
+    echo "Configuration file $config_file not found" >&2
+    return 1
+  fi
+  
+  # Output the configurations array
+  printf '%s\n' "${configs[@]}"
+  return 0
+}
