@@ -160,15 +160,30 @@ let config = CelebornConfig::builder()
 
 See the `examples/` directory for more detailed examples:
 
-- `basic_usage.rs` - Simple push and fetch operations
-- `async_push.rs` - Concurrent data pushing with multiple map tasks
+### Local Examples (No External Services Required)
 
-Run examples with:
+- **`protocol_demo.rs`** - Demonstrates the Celeborn protocol implementation with a mock server/client. **Recommended for testing the protocol locally.**
 
 ```bash
-cargo run --example basic_usage
-cargo run --example async_push
+cargo run --example protocol_demo
 ```
+
+### Examples Requiring Celeborn Services
+
+These examples require a running Celeborn cluster:
+
+- **`basic_usage.rs`** - Complete shuffle workflow (register, push, fetch, cleanup). Requires a Celeborn Master.
+- **`worker_connection.rs`** - Direct connection to a Worker's fetch port. Requires a Celeborn Worker.
+
+```bash
+# Connect to a Celeborn Master (default: 127.0.0.1:9097)
+CELEBORN_MASTER=<master-host>:9097 cargo run --example basic_usage
+
+# Connect to a Celeborn Worker's fetch port
+WORKER_HOST=<worker-host> WORKER_FETCH_PORT=<port> cargo run --example worker_connection
+```
+
+> **Note**: The `basic_usage` example requires Master RPC communication, which uses Java serialization format (NettyRpcEnv). This is currently a work-in-progress. The `worker_connection` example works with the TransportClient protocol and can successfully communicate with Worker fetch/push/replicate ports.
 
 ## Protocol Compatibility
 
