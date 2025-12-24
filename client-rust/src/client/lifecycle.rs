@@ -17,11 +17,11 @@
 //!
 //! Manages shuffle registration, heartbeats, and partition locations.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -44,6 +44,8 @@ struct ShuffleState {
     partition_locations: DashMap<i32, Vec<PartitionLocation>>,
     /// Whether the shuffle is registered
     registered: AtomicBool,
+    /// Committed partition IDs (unique_id)
+    committed_ids: DashSet<String>,
 }
 
 impl ShuffleState {
@@ -53,6 +55,7 @@ impl ShuffleState {
             num_partitions,
             partition_locations: DashMap::new(),
             registered: AtomicBool::new(false),
+            committed_ids: DashSet::new(),
         }
     }
 }
@@ -293,6 +296,65 @@ impl LifecycleManager {
         Ok(())
     }
 
+    /// Mark a partition as successfully pushed (written).
+    pub fn add_partition_data_pushed(&self, shuffle_id: i32, unique_id: &str) {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            state.committed_ids.insert(unique_id.to_string());
+        }
+    }
+
+    /// Request Master to commit files for a shuffle.
+    ///
+    /// This should be called after all mappers have finished.
+    pub async fn request_commit_files(&self, shuffle_id: i32) -> Result<PbCommitFilesResponse> {
+        info!("Requesting commit files for shuffle {}", shuffle_id);
+        
+        let (committed_ids, map_attempts) = {
+            let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+                CelebornError::ShuffleNotFound(shuffle_id)
+            })?;
+            
+            let ids: Vec<String> = state.committed_ids.iter().map(|k| k.clone()).collect();
+            // Assuming simplified map attempts for now - in full impl we'd track per map
+            let attempts = vec![0; state.num_mappers as usize];
+            (ids, attempts)
+        };
+        
+        // We put all committed IDs as primary for now.
+        // In a full implementation, we would distinguish primary/replica.
+        let request = PbCommitFiles {
+            application_id: self.config.app_id.clone(),
+            shuffle_id,
+            primary_ids: committed_ids.clone(),
+            replica_ids: vec![], // TODO: Track replica IDs
+            map_attempts,
+            epoch: 0,
+            mock_failure: false,
+        };
+
+        let response: PbCommitFilesResponse = self
+            .transport_client
+            .send_to_master(TransportMessageType::CommitFiles, &request)
+            .await?;
+
+        let status = StatusCode::from(response.status);
+        if !status.is_success() {
+            warn!(
+                "Commit files failed for shuffle {}: {:?}",
+                shuffle_id, status
+            );
+        } else {
+            info!(
+                "Commit files successful for shuffle {}: {} primary, {} replica committed",
+                shuffle_id,
+                response.committed_primary_ids.len(),
+                response.committed_replica_ids.len()
+            );
+        }
+
+        Ok(response)
+    }
+
     /// Get reducer file groups.
     ///
     /// Note: In Celeborn, GetReducerFileGroup is handled by LifecycleManager (client-side).
@@ -302,16 +364,46 @@ impl LifecycleManager {
         &self,
         shuffle_id: i32,
     ) -> Result<HashMap<i32, Vec<PartitionLocation>>> {
-        // Return the partition locations we stored during shuffle registration
-        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
-            CelebornError::ShuffleNotFound(shuffle_id)
-        })?;
-
-        let mut result = HashMap::new();
-        for entry in state.partition_locations.iter() {
-            result.insert(*entry.key(), entry.value().clone());
+        // First check if we have the shuffle state locally (e.g. we registered it)
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            let mut result = HashMap::new();
+            for entry in state.partition_locations.iter() {
+                result.insert(*entry.key(), entry.value().clone());
+            }
+            return Ok(result);
         }
 
+        // If not found locally, try to fetch from Master (Reducer role)
+        info!("Shuffle {} not found locally, fetching from Master...", shuffle_id);
+        
+        let request = PbGetReducerFileGroup {
+            shuffle_id,
+        };
+        
+        let response: PbGetReducerFileGroupResponse = self
+            .transport_client
+            .send_to_master(TransportMessageType::GetReducerFileGroup, &request)
+            .await?;
+            
+        let status = StatusCode::from(response.status);
+        if !status.is_success() {
+             return Err(CelebornError::ServerError {
+                status,
+                message: format!("Failed to get reducer file group for shuffle {}", shuffle_id),
+            });
+        }
+        
+        // Convert response to our format
+        let mut result = HashMap::new();
+        for (partition_id, file_group) in response.file_groups {
+            let locations: Vec<PartitionLocation> = file_group
+                .locations
+                .iter()
+                .map(|pb_loc| self.convert_partition_location(pb_loc))
+                .collect();
+            result.insert(partition_id, locations);
+        }
+        
         Ok(result)
     }
 

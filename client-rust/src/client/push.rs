@@ -315,6 +315,16 @@ impl DataPusher {
 
         // Update metrics
         self.lifecycle_manager.add_bytes_written(data.len() as i64);
+        
+        // Mark partition as written (for commit)
+        // Note: In strict mode, we might wait for ack, but for now we assume send success means write success
+        // or at least we track it as attempted.
+        // Also note: partition_unique_id passed here is just uniqueId, but committed_ids tracks uniqueId
+        self.lifecycle_manager.add_partition_data_pushed(
+            // We need shuffle_id, but it's not passed directly, parsed from shuffle_key
+            shuffle_key.split('-').last().unwrap_or("0").parse().unwrap_or(0),
+            partition_unique_id
+        );
 
         trace!(
             "Pushed {} bytes to partition {} on {}",
@@ -362,6 +372,9 @@ impl DataPusher {
             combined_data.put_slice(data);
         }
 
+        // Clone IDs for tracking before moving them into the message
+        let ids_to_track = partition_unique_ids.clone();
+
         let push_merged = PushMergedData {
             request_id,
             mode,
@@ -388,6 +401,12 @@ impl DataPusher {
 
         // Update metrics
         self.lifecycle_manager.add_bytes_written(total_size as i64);
+        
+        // Mark partitions as written
+        let shuffle_id_int = shuffle_key.split('-').last().unwrap_or("0").parse().unwrap_or(0);
+        for id in &ids_to_track {
+             self.lifecycle_manager.add_partition_data_pushed(shuffle_id_int, id);
+        }
 
         debug!(
             "Pushed merged data ({} partitions, {} bytes) to {}",
