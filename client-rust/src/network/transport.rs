@@ -26,6 +26,8 @@ use crate::config::CelebornConfig;
 use crate::error::{CelebornError, Result, StatusCode};
 use crate::network::connection::ConnectionPool;
 use crate::network::codec::Frame;
+use crate::network::master_rpc::MasterRpcClient;
+use crate::protocol::java_serialization::RpcAddress;
 use crate::protocol::message::MessageType;
 use crate::protocol::transport::*;
 
@@ -33,12 +35,10 @@ use crate::protocol::transport::*;
 pub struct TransportClient {
     /// Configuration
     config: Arc<CelebornConfig>,
-    /// Connection pool
+    /// Connection pool (for worker communication)
     connection_pool: ConnectionPool,
-    /// Master endpoints
-    master_endpoints: Vec<SocketAddr>,
-    /// Current master index
-    current_master_index: std::sync::atomic::AtomicUsize,
+    /// Master RPC client (uses Java serialization)
+    master_rpc_client: MasterRpcClient,
 }
 
 impl TransportClient {
@@ -65,29 +65,24 @@ impl TransportClient {
             config.max_in_flight_requests,
         );
 
+        // Create Master RPC client with Java serialization support
+        let master_rpc_client = MasterRpcClient::new(
+            master_endpoints,
+            Some(RpcAddress::new("localhost", 0)),
+            config.rpc_timeout,
+            config.max_retries as usize,
+            config.retry_wait,
+        )?;
+
         Ok(Self {
             config,
             connection_pool,
-            master_endpoints,
-            current_master_index: std::sync::atomic::AtomicUsize::new(0),
+            master_rpc_client,
         })
     }
 
-    /// Get the current master endpoint.
-    fn current_master(&self) -> SocketAddr {
-        let index = self
-            .current_master_index
-            .load(std::sync::atomic::Ordering::Relaxed);
-        self.master_endpoints[index % self.master_endpoints.len()]
-    }
-
-    /// Switch to the next master endpoint.
-    fn switch_master(&self) {
-        self.current_master_index
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
     /// Send an RPC request to the master.
+    /// Uses Java serialization format required by Celeborn Master.
     pub async fn send_to_master<Req, Resp>(
         &self,
         message_type: TransportMessageType,
@@ -97,34 +92,11 @@ impl TransportClient {
         Req: ProstMessage,
         Resp: ProstMessage + Default,
     {
-        let mut last_error = None;
-        
-        for attempt in 0..self.config.max_retries {
-            let master_addr = self.current_master();
-            
-            match self.send_rpc(master_addr, message_type, request).await {
-                Ok(response) => return Ok(response),
-                Err(e) => {
-                    error!(
-                        "Failed to send RPC to master {} (attempt {}): {}",
-                        master_addr, attempt + 1, e
-                    );
-                    last_error = Some(e);
-                    self.switch_master();
-                    
-                    if attempt < self.config.max_retries - 1 {
-                        tokio::time::sleep(self.config.retry_wait).await;
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            CelebornError::Connection("All master endpoints failed".to_string())
-        }))
+        self.master_rpc_client.send_rpc(message_type, request).await
     }
 
-    /// Send an RPC request to a specific address.
+    /// Send an RPC request to a specific address (for worker communication).
+    /// Uses the simpler protobuf-based format.
     pub async fn send_rpc<Req, Resp>(
         &self,
         addr: SocketAddr,

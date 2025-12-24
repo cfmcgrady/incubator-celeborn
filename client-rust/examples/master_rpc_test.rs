@@ -15,7 +15,8 @@
 
 //! Example demonstrating Master RPC communication using Java serialization.
 //!
-//! This example connects to a Celeborn Master and sends a RegisterShuffle request.
+//! This example connects to a Celeborn Master and sends a HeartbeatFromApplication request.
+//! This is the correct message type for registering an application with the Master.
 //!
 //! Usage:
 //!   cargo run --example master_rpc_test -- [master_host:port]
@@ -25,11 +26,12 @@
 use std::env;
 use std::net::SocketAddr;
 use std::time::Duration;
+use uuid::Uuid;
 
 use celeborn_client::network::MasterRpcClient;
 use celeborn_client::protocol::java_serialization::RpcAddress;
 use celeborn_client::protocol::transport::{
-    PbRegisterShuffle, PbRegisterShuffleResponse, TransportMessageType,
+    PbHeartbeatFromApplication, PbHeartbeatFromApplicationResponse, TransportMessageType,
 };
 
 #[tokio::main]
@@ -68,24 +70,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_millis(500),
     )?;
 
-    println!("\n--- Sending RegisterShuffle Request ---\n");
+    println!("\n--- Sending HeartbeatFromApplication Request ---\n");
 
-    // Create a RegisterShuffle request
-    let request = PbRegisterShuffle {
-        shuffle_id: 1,
-        num_mappers: 4,
-        num_partitions: 10,
+    // Generate a unique application ID
+    let app_id = format!("rust-client-test-{}", Uuid::new_v4());
+    let request_id = Uuid::new_v4().to_string();
+
+    // Create a HeartbeatFromApplication request
+    // This is the correct message type for registering/heartbeating an application with Master
+    let request = PbHeartbeatFromApplication {
+        app_id: app_id.clone(),
+        total_written: 0,
+        file_count: 0,
+        request_id: request_id.clone(),
+        need_checked_worker_list: vec![],
+        should_response: true, // Request a response
     };
 
     println!("Request:");
-    println!("  shuffle_id: {}", request.shuffle_id);
-    println!("  num_mappers: {}", request.num_mappers);
-    println!("  num_partitions: {}", request.num_partitions);
+    println!("  app_id: {}", request.app_id);
+    println!("  request_id: {}", request.request_id);
+    println!("  total_written: {}", request.total_written);
+    println!("  file_count: {}", request.file_count);
+    println!("  should_response: {}", request.should_response);
 
     // Send the request
     match client
-        .send_rpc::<PbRegisterShuffle, PbRegisterShuffleResponse>(
-            TransportMessageType::RegisterShuffle,
+        .send_rpc::<PbHeartbeatFromApplication, PbHeartbeatFromApplicationResponse>(
+            TransportMessageType::HeartbeatFromApplication,
             &request,
         )
         .await
@@ -95,15 +107,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Response:");
             println!("  status: {}", response.status);
             println!(
-                "  partition_locations: {} locations",
-                response.partition_locations.len()
+                "  excluded_workers: {} workers",
+                response.excluded_workers.len()
+            );
+            println!(
+                "  unknown_workers: {} workers",
+                response.unknown_workers.len()
+            );
+            println!(
+                "  shutting_workers: {} workers",
+                response.shutting_workers.len()
             );
 
-            for (i, loc) in response.partition_locations.iter().enumerate() {
-                println!(
-                    "    [{}] id={}, epoch={}, host={}, push_port={}, fetch_port={}",
-                    i, loc.id, loc.epoch, loc.host, loc.push_port, loc.fetch_port
-                );
+            if !response.excluded_workers.is_empty() {
+                println!("\n  Excluded workers:");
+                for worker in &response.excluded_workers {
+                    println!(
+                        "    - {}:{} (push:{}, fetch:{})",
+                        worker.host, worker.rpc_port, worker.push_port, worker.fetch_port
+                    );
+                }
             }
         }
         Err(e) => {

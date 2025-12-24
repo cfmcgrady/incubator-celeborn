@@ -143,6 +143,10 @@ impl LifecycleManager {
     }
 
     /// Register a new shuffle.
+    ///
+    /// This sends a RequestSlots message to the Master to allocate partition locations.
+    /// Note: In Celeborn, RegisterShuffle is handled by LifecycleManager (client-side),
+    /// while RequestSlots is the actual RPC to Master for slot allocation.
     pub async fn register_shuffle(
         &self,
         shuffle_id: i32,
@@ -159,42 +163,69 @@ impl LifecycleManager {
             shuffle_id, num_mappers, num_partitions
         );
 
-        let request = PbRegisterShuffle {
+        // Create partition ID list
+        let partition_id_list: Vec<i32> = (0..num_partitions).collect();
+
+        // Request slots from Master
+        let request = PbRequestSlots {
+            application_id: self.config.app_id.clone(),
             shuffle_id,
-            num_mappers,
-            num_partitions,
+            partition_id_list,
+            hostname: gethostname::gethostname().to_string_lossy().to_string(),
+            should_replicate: self.config.push_replicate_enabled,
+            request_id: Uuid::new_v4().to_string(),
+            storage_type: 0, // Default storage type
+            user_identifier: Some(PbUserIdentifier {
+                tenant_id: "default".to_string(),
+                name: "default".to_string(),
+            }),
+            should_rack_aware: false,
+            max_workers: 0, // 0 means no limit
+            available_storage_types: 1, // MEMORY = 1
         };
 
-        let response: PbRegisterShuffleResponse = self
+        let response: PbRequestSlotsResponse = self
             .transport_client
-            .send_to_master(TransportMessageType::RegisterShuffle, &request)
+            .send_to_master(TransportMessageType::RequestSlots, &request)
             .await?;
 
         let status = StatusCode::from(response.status);
-        if !status.is_success() && status != StatusCode::ShuffleAlreadyRegistered {
+        if !status.is_success() {
             return Err(CelebornError::ServerError {
                 status,
-                message: format!("Failed to register shuffle {}", shuffle_id),
+                message: format!("Failed to request slots for shuffle {}", shuffle_id),
             });
         }
 
         // Create shuffle state
         let state = Arc::new(ShuffleState::new(num_mappers, num_partitions));
 
-        // Store partition locations
-        for pb_location in response.partition_locations {
-            let location = self.convert_partition_location(&pb_location);
-            state
-                .partition_locations
-                .entry(location.id)
-                .or_insert_with(Vec::new)
-                .push(location);
+        // Store partition locations from worker resources
+        for (_worker_id, worker_resource) in response.worker_resource {
+            for pb_location in worker_resource.primary_partitions {
+                let location = self.convert_partition_location(&pb_location);
+                state
+                    .partition_locations
+                    .entry(location.id)
+                    .or_insert_with(Vec::new)
+                    .push(location);
+            }
+            for pb_location in worker_resource.replica_partitions {
+                let location = self.convert_partition_location(&pb_location);
+                state
+                    .partition_locations
+                    .entry(location.id)
+                    .or_insert_with(Vec::new)
+                    .push(location);
+            }
         }
 
         state.registered.store(true, Ordering::Relaxed);
+        let partition_count = state.partition_locations.len();
         self.shuffles.insert(shuffle_id, state);
 
-        info!("Shuffle {} registered successfully", shuffle_id);
+        info!("Shuffle {} registered successfully with {} partition locations",
+              shuffle_id, partition_count);
         Ok(shuffle_id)
     }
 
@@ -235,70 +266,50 @@ impl LifecycleManager {
     }
 
     /// Signal that a mapper has finished.
+    ///
+    /// Note: In Celeborn, MapperEnd is handled by LifecycleManager (client-side component).
+    /// For the Rust client, we track mapper completion locally. The actual commit happens
+    /// when all mappers are done and we call get_reducer_file_group.
     pub async fn mapper_end(
         &self,
         shuffle_id: i32,
         map_id: i32,
         attempt_id: i32,
-        num_mappers: i32,
+        _num_mappers: i32,
     ) -> Result<()> {
         debug!(
-            "Mapper end: shuffle={}, map={}, attempt={}, num_mappers={}",
-            shuffle_id, map_id, attempt_id, num_mappers
+            "Mapper end: shuffle={}, map={}, attempt={}",
+            shuffle_id, map_id, attempt_id
         );
 
-        let request = PbMapperEnd {
-            shuffle_id,
-            map_id,
-            attempt_id,
-            num_mappers,
-            partition_id: -1, // Not used for reduce partition mode
-        };
-
-        let response: PbMapperEndResponse = self
-            .transport_client
-            .send_to_master(TransportMessageType::MapperEnd, &request)
-            .await?;
-
-        let status = StatusCode::from(response.status);
-        if !status.is_success() {
-            return Err(CelebornError::ServerError {
-                status,
-                message: format!("Mapper end failed for shuffle {}", shuffle_id),
-            });
-        }
+        // In the Rust client, we handle mapper completion locally.
+        // The actual data commit to workers happens during push_data.
+        // When all mappers are done, the reducer can fetch data.
+        
+        // For now, we just log the completion. In a full implementation,
+        // we would track mapper completion and trigger commit when all mappers are done.
+        info!("Mapper {} (attempt {}) completed for shuffle {}", map_id, attempt_id, shuffle_id);
 
         Ok(())
     }
 
     /// Get reducer file groups.
+    ///
+    /// Note: In Celeborn, GetReducerFileGroup is handled by LifecycleManager (client-side).
+    /// For the Rust client, we return the partition locations that were allocated during
+    /// shuffle registration (RequestSlots).
     pub async fn get_reducer_file_group(
         &self,
         shuffle_id: i32,
     ) -> Result<HashMap<i32, Vec<PartitionLocation>>> {
-        let request = PbGetReducerFileGroup { shuffle_id };
-
-        let response: PbGetReducerFileGroupResponse = self
-            .transport_client
-            .send_to_master(TransportMessageType::GetReducerFileGroup, &request)
-            .await?;
-
-        let status = StatusCode::from(response.status);
-        if !status.is_success() {
-            return Err(CelebornError::ServerError {
-                status,
-                message: format!("Failed to get reducer file group for shuffle {}", shuffle_id),
-            });
-        }
+        // Return the partition locations we stored during shuffle registration
+        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+            CelebornError::ShuffleNotFound(shuffle_id)
+        })?;
 
         let mut result = HashMap::new();
-        for (partition_id, file_group) in response.file_groups {
-            let locations: Vec<PartitionLocation> = file_group
-                .locations
-                .iter()
-                .map(|loc| self.convert_partition_location(loc))
-                .collect();
-            result.insert(partition_id, locations);
+        for entry in state.partition_locations.iter() {
+            result.insert(*entry.key(), entry.value().clone());
         }
 
         Ok(result)

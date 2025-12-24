@@ -179,25 +179,35 @@ impl MasterRpcClient {
         // Generate request ID
         let request_id = next_request_id();
 
-        // Build the complete frame
-        // NettyRpcEnv uses a custom frame format:
-        // - Frame length (4 bytes, big-endian)
-        // - Request type (1 byte): 0 = OneWay, 1 = RpcRequest
-        // - Request ID (8 bytes, big-endian) - only for RpcRequest
-        // - Message body
-        let mut frame = BytesMut::with_capacity(4 + 1 + 8 + request_message.len());
+        // Build the complete frame according to TransportFrameDecoder format:
+        //
+        // Header (9 bytes):
+        // - msgSize (4 bytes): size of message content (requestId + bodySize = 12 bytes)
+        // - msgType (1 byte): Message.Type.id (RPC_REQUEST = 3)
+        // - bodySize (4 bytes): size of body (the RequestMessage)
+        //
+        // Message content (12 bytes for RPC_REQUEST):
+        // - requestId (8 bytes)
+        // - bodySize (4 bytes) - redundant but required
+        //
+        // Body:
+        // - The actual payload (RequestMessage serialized)
         
-        // Frame length (excluding the length field itself)
-        let frame_body_len = 1 + 8 + request_message.len();
-        frame.put_u32(frame_body_len as u32);
+        let body_size = request_message.len();
+        let msg_size = 8 + 4; // requestId (8) + bodySize field in message (4)
         
-        // Request type: 1 = RpcRequest
-        frame.put_u8(1);
+        let mut frame = BytesMut::with_capacity(9 + msg_size + body_size);
         
-        // Request ID
-        frame.put_u64(request_id);
+        // Header
+        frame.put_i32(msg_size as i32);           // msgSize
+        frame.put_u8(3);                           // msgType: RPC_REQUEST = 3
+        frame.put_i32(body_size as i32);          // bodySize
         
-        // Message body
+        // Message content (RpcRequest.encode)
+        frame.put_i64(request_id as i64);         // requestId
+        frame.put_i32(body_size as i32);          // bodySize (redundant but required)
+        
+        // Body (the RequestMessage)
         frame.extend_from_slice(&request_message);
 
         debug!(
@@ -219,55 +229,79 @@ impl MasterRpcClient {
     }
 
     /// Read and decode the RPC response.
+    ///
+    /// Response frame format (TransportFrameDecoder):
+    /// Header (9 bytes):
+    /// - msgSize (4 bytes): size of message content
+    /// - msgType (1 byte): Message.Type.id (RPC_RESPONSE=4, RPC_FAILURE=5)
+    /// - bodySize (4 bytes): size of body
+    ///
+    /// Message content (for RPC_RESPONSE/RPC_FAILURE):
+    /// - requestId (8 bytes)
+    /// - bodySize (4 bytes) - redundant
+    ///
+    /// Body:
+    /// - The actual payload (Java serialized response)
     async fn read_response<Resp>(&self, stream: &mut TcpStream, expected_request_id: u64) -> Result<Resp>
     where
         Resp: ProstMessage + Default,
     {
-        // Read frame length (4 bytes)
-        let mut len_buf = [0u8; 4];
-        timeout(self.rpc_timeout, stream.read_exact(&mut len_buf))
+        // Read header (9 bytes)
+        let mut header = [0u8; 9];
+        timeout(self.rpc_timeout, stream.read_exact(&mut header))
             .await
             .map_err(|_| CelebornError::Timeout(self.rpc_timeout.as_millis() as u64))?
-            .map_err(|e| CelebornError::Connection(format!("Failed to read length: {}", e)))?;
+            .map_err(|e| CelebornError::Connection(format!("Failed to read header: {}", e)))?;
 
-        let frame_len = u32::from_be_bytes(len_buf) as usize;
-        debug!("Response frame length: {}", frame_len);
+        let msg_size = i32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
+        let msg_type = header[4];
+        let body_size = i32::from_be_bytes([header[5], header[6], header[7], header[8]]) as usize;
 
-        if frame_len > 100 * 1024 * 1024 {
+        debug!(
+            "Response header: msg_size={}, msg_type={}, body_size={}",
+            msg_size, msg_type, body_size
+        );
+
+        // Validate sizes
+        let total_size = msg_size + body_size;
+        if total_size > 100 * 1024 * 1024 {
             return Err(CelebornError::Protocol(format!(
                 "Frame too large: {} bytes",
-                frame_len
+                total_size
             )));
         }
 
-        // Read frame body
-        let mut frame_body = vec![0u8; frame_len];
-        timeout(self.rpc_timeout, stream.read_exact(&mut frame_body))
-            .await
-            .map_err(|_| CelebornError::Timeout(self.rpc_timeout.as_millis() as u64))?
-            .map_err(|e| CelebornError::Connection(format!("Failed to read body: {}", e)))?;
-
-        // Parse response
-        // Response format:
-        // - Response type (1 byte): 0 = RpcResponse, 1 = RpcFailure
-        // - Request ID (8 bytes)
-        // - Response body (Java serialized)
-        
-        if frame_body.len() < 9 {
-            return Err(CelebornError::Protocol(
-                "Response frame too short".to_string(),
-            ));
+        // Read message content
+        let mut msg_content = vec![0u8; msg_size];
+        if msg_size > 0 {
+            timeout(self.rpc_timeout, stream.read_exact(&mut msg_content))
+                .await
+                .map_err(|_| CelebornError::Timeout(self.rpc_timeout.as_millis() as u64))?
+                .map_err(|e| CelebornError::Connection(format!("Failed to read message: {}", e)))?;
         }
 
-        let response_type = frame_body[0];
-        let response_request_id = u64::from_be_bytes([
-            frame_body[1], frame_body[2], frame_body[3], frame_body[4],
-            frame_body[5], frame_body[6], frame_body[7], frame_body[8],
-        ]);
+        // Read body
+        let mut body = vec![0u8; body_size];
+        if body_size > 0 {
+            timeout(self.rpc_timeout, stream.read_exact(&mut body))
+                .await
+                .map_err(|_| CelebornError::Timeout(self.rpc_timeout.as_millis() as u64))?
+                .map_err(|e| CelebornError::Connection(format!("Failed to read body: {}", e)))?;
+        }
+
+        // Parse request ID from message content
+        let response_request_id = if msg_content.len() >= 8 {
+            i64::from_be_bytes([
+                msg_content[0], msg_content[1], msg_content[2], msg_content[3],
+                msg_content[4], msg_content[5], msg_content[6], msg_content[7],
+            ]) as u64
+        } else {
+            0
+        };
 
         debug!(
-            "Response type: {}, request_id: {}",
-            response_type, response_request_id
+            "Response: msg_type={}, request_id={}",
+            msg_type, response_request_id
         );
 
         if response_request_id != expected_request_id {
@@ -277,17 +311,15 @@ impl MasterRpcClient {
             );
         }
 
-        let response_body = &frame_body[9..];
-
-        match response_type {
-            0 => {
-                // RpcResponse - body is Java serialized TransportMessage
-                // We need to deserialize it to get the protobuf payload
-                self.decode_java_response(response_body)
+        match msg_type {
+            4 => {
+                // RPC_RESPONSE - body is Java serialized TransportMessage
+                debug!("Response body ({} bytes): {:02x?}", body.len(), &body[..std::cmp::min(100, body.len())]);
+                self.decode_java_response(&body)
             }
-            1 => {
-                // RpcFailure
-                let error_msg = self.decode_java_error(response_body)?;
+            5 => {
+                // RPC_FAILURE
+                let error_msg = self.decode_java_error(&body)?;
                 Err(CelebornError::ServerError {
                     status: crate::error::StatusCode::RpcFailed,
                     message: error_msg,
@@ -295,27 +327,20 @@ impl MasterRpcClient {
             }
             _ => Err(CelebornError::Protocol(format!(
                 "Unknown response type: {}",
-                response_type
+                msg_type
             ))),
         }
     }
 
-    /// Decode a Java serialized response containing TransportMessage.
+    /// Decode a Java serialized response.
+    ///
+    /// The response can be either:
+    /// 1. TransportMessage - contains protobuf payload
+    /// 2. RpcFailure - contains a Throwable (error)
     fn decode_java_response<Resp>(&self, data: &[u8]) -> Result<Resp>
     where
         Resp: ProstMessage + Default,
     {
-        // The response is Java serialized. We need to find the TransportMessage
-        // and extract its payload (which is protobuf encoded).
-        //
-        // For now, we'll use a simplified approach: scan for the protobuf payload
-        // by looking for known patterns in the Java serialization stream.
-        
-        // Java serialization format:
-        // - Magic: 0xACED
-        // - Version: 0x0005
-        // - Object data...
-        
         if data.len() < 4 {
             return Err(CelebornError::Protocol(
                 "Response too short for Java serialization".to_string(),
@@ -330,20 +355,76 @@ impl MasterRpcClient {
             )));
         }
 
-        // For TransportMessage, we need to find:
-        // 1. messageTypeValue (int)
-        // 2. payload (byte[])
-        //
-        // The payload is the protobuf-encoded response message.
-        // We'll scan for the byte array and extract it.
-        
-        // This is a simplified parser that looks for the TransportMessage structure
+        // Check what type of object this is by looking at the class name
+        // Format after header: TC_OBJECT (0x73) + TC_CLASSDESC (0x72) + length (2 bytes) + class name
+        if data.len() > 10 && data[4] == 0x73 && data[5] == 0x72 {
+            let class_name_len = u16::from_be_bytes([data[6], data[7]]) as usize;
+            if data.len() > 8 + class_name_len {
+                let class_name = String::from_utf8_lossy(&data[8..8 + class_name_len]);
+                debug!("Response object class: {}", class_name);
+                
+                if class_name.contains("RpcFailure") {
+                    // This is an RpcFailure - extract the error message
+                    let error_msg = self.extract_rpc_failure_message(data)?;
+                    return Err(CelebornError::ServerError {
+                        status: crate::error::StatusCode::RpcFailed,
+                        message: error_msg,
+                    });
+                }
+            }
+        }
+
+        // Try to extract TransportMessage payload
         let payload = self.extract_transport_message_payload(data)?;
         
         // Decode the protobuf response from the payload
         Resp::decode(payload.as_slice()).map_err(|e| {
             CelebornError::Serialization(format!("Failed to decode protobuf response: {}", e))
         })
+    }
+
+    /// Extract error message from RpcFailure Java serialization.
+    fn extract_rpc_failure_message(&self, data: &[u8]) -> Result<String> {
+        // RpcFailure contains a Throwable. We need to find the exception message.
+        // Look for strings in the serialization that might be the error message.
+        
+        let mut messages = Vec::new();
+        let mut pos = 0;
+        
+        while pos < data.len() - 3 {
+            // Look for TC_STRING (0x74)
+            if data[pos] == 0x74 {
+                pos += 1;
+                if pos + 2 <= data.len() {
+                    let str_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                    pos += 2;
+                    if pos + str_len <= data.len() {
+                        if let Ok(s) = String::from_utf8(data[pos..pos + str_len].to_vec()) {
+                            // Skip class names and type descriptors
+                            if !s.starts_with("java.")
+                                && !s.starts_with("org.apache.celeborn.common.rpc")
+                                && !s.starts_with("[")
+                                && !s.starts_with("L")
+                                && !s.is_empty()
+                                && s.len() > 5 // Skip short strings like field names
+                            {
+                                messages.push(s);
+                            }
+                        }
+                        pos += str_len;
+                        continue;
+                    }
+                }
+            }
+            pos += 1;
+        }
+
+        if messages.is_empty() {
+            Ok("Unknown RPC failure".to_string())
+        } else {
+            // Return the longest message (likely the actual error)
+            Ok(messages.into_iter().max_by_key(|s| s.len()).unwrap_or_default())
+        }
     }
 
     /// Extract the payload from a Java serialized TransportMessage.

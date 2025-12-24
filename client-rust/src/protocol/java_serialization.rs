@@ -198,7 +198,7 @@ impl JavaObjectOutputStream {
     }
 
     /// Write a TransportMessage object.
-    /// 
+    ///
     /// TransportMessage has:
     /// - int messageTypeValue
     /// - byte[] payload
@@ -208,6 +208,9 @@ impl JavaObjectOutputStream {
         
         // Write class descriptor
         self.write_transport_message_class_desc();
+        
+        // Object gets a handle after class descriptor
+        self.new_handle();
         
         // Write field values in declaration order:
         // 1. messageTypeValue (int)
