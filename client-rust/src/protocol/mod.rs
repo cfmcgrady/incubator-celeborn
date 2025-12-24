@@ -228,3 +228,39 @@ pub fn decode_string(buf: &mut Bytes) -> io::Result<String> {
 pub fn string_encoded_length(s: &str) -> usize {
     2 + s.len()
 }
+
+// ============================================================================
+// Java-compatible encoding functions (for native protocol messages like PushData)
+// Java uses 4-byte length prefix for strings
+// ============================================================================
+
+/// Encode a string to the buffer with 4-byte length prefix (Java compatible).
+pub fn encode_string_java(buf: &mut BytesMut, s: &str) {
+    let bytes = s.as_bytes();
+    buf.put_i32(bytes.len() as i32);
+    buf.put_slice(bytes);
+}
+
+/// Decode a string from the buffer with 4-byte length prefix (Java compatible).
+pub fn decode_string_java(buf: &mut Bytes) -> io::Result<String> {
+    if buf.remaining() < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Not enough bytes for string length",
+        ));
+    }
+    let len = buf.get_i32() as usize;
+    if buf.remaining() < len {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "Not enough bytes for string content",
+        ));
+    }
+    let bytes = buf.copy_to_bytes(len);
+    String::from_utf8(bytes.to_vec()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Get the encoded length of a string with 4-byte length prefix (Java compatible).
+pub fn string_encoded_length_java(s: &str) -> usize {
+    4 + s.len()
+}

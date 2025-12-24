@@ -18,7 +18,10 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
 
-use super::{decode_string, encode_string, string_encoded_length, Decodable, Encodable};
+use super::{
+    decode_string, decode_string_java, encode_string, encode_string_java,
+    string_encoded_length, string_encoded_length_java, Decodable, Encodable,
+};
 
 /// Message type identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,24 +328,32 @@ impl PushData {
 }
 
 impl Encodable for PushData {
+    /// Get the encoded length of the PushData message.
+    ///
+    /// Java format (from PushData.java):
+    /// - requestId: 8 bytes (long)
+    /// - mode: 1 byte
+    /// - shuffleKey: 4 bytes length + UTF-8 bytes
+    /// - partitionUniqueId: 4 bytes length + UTF-8 bytes
+    /// - body: remaining bytes (no length prefix, body is sent separately in the frame)
     fn encoded_length(&self) -> usize {
-        1 + // message type
         8 + // request_id
         1 + // mode
-        string_encoded_length(&self.shuffle_key) +
-        string_encoded_length(&self.partition_unique_id) +
-        4 + // body length
-        self.body.len()
+        string_encoded_length_java(&self.shuffle_key) +
+        string_encoded_length_java(&self.partition_unique_id)
+        // Note: body is NOT included here - it's sent as a separate part of the frame
     }
 
+    /// Encode the PushData message to match Java's format.
+    ///
+    /// The message type byte is NOT included here - it's handled by the frame encoder.
+    /// The body is also NOT included here - it's sent as a separate part of the frame.
     fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u8(MessageType::PushData as u8);
         buf.put_i64(self.request_id);
         buf.put_u8(self.mode);
-        encode_string(buf, &self.shuffle_key);
-        encode_string(buf, &self.partition_unique_id);
-        buf.put_i32(self.body.len() as i32);
-        buf.put_slice(&self.body);
+        encode_string_java(buf, &self.shuffle_key);
+        encode_string_java(buf, &self.partition_unique_id);
+        // Note: body is NOT encoded here - it's sent separately
     }
 }
 
@@ -356,23 +367,11 @@ impl Decodable for PushData {
         }
         let request_id = buf.get_i64();
         let mode = buf.get_u8();
-        let shuffle_key = decode_string(buf)?;
-        let partition_unique_id = decode_string(buf)?;
+        let shuffle_key = decode_string_java(buf)?;
+        let partition_unique_id = decode_string_java(buf)?;
         
-        if buf.remaining() < 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Not enough bytes for PushData body length",
-            ));
-        }
-        let body_len = buf.get_i32() as usize;
-        if buf.remaining() < body_len {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Not enough bytes for PushData body",
-            ));
-        }
-        let body = buf.copy_to_bytes(body_len);
+        // Body is the remaining bytes
+        let body = buf.copy_to_bytes(buf.remaining());
         
         Ok(Self {
             request_id,
@@ -412,36 +411,46 @@ pub struct PushMergedData {
 }
 
 impl Encodable for PushMergedData {
+    /// Get the encoded length of the PushMergedData message.
+    ///
+    /// Java format (from PushMergedData.java):
+    /// - requestId: 8 bytes (long)
+    /// - mode: 1 byte
+    /// - shuffleKey: 4 bytes length + UTF-8 bytes
+    /// - partitionUniqueIds: 4 bytes count + (4 bytes length + UTF-8 bytes) per string
+    /// - batchOffsets: 4 bytes count + 4 bytes per int
+    /// - body: remaining bytes (sent separately in the frame)
     fn encoded_length(&self) -> usize {
-        let mut len = 1 + 8 + 1; // type + request_id + mode
-        len += string_encoded_length(&self.shuffle_key);
+        let mut len = 8 + 1; // request_id + mode
+        len += string_encoded_length_java(&self.shuffle_key);
         len += 4; // partition count
         for id in &self.partition_unique_ids {
-            len += string_encoded_length(id);
+            len += string_encoded_length_java(id);
         }
         len += 4 + self.batch_offsets.len() * 4; // offsets count + offsets
-        len += 4 + self.body.len(); // body length + body
+        // Note: body is NOT included here - it's sent as a separate part of the frame
         len
     }
 
+    /// Encode the PushMergedData message to match Java's format.
+    ///
+    /// The message type byte is NOT included here - it's handled by the frame encoder.
+    /// The body is also NOT included here - it's sent as a separate part of the frame.
     fn encode(&self, buf: &mut BytesMut) {
-        buf.put_u8(MessageType::PushMergedData as u8);
         buf.put_i64(self.request_id);
         buf.put_u8(self.mode);
-        encode_string(buf, &self.shuffle_key);
+        encode_string_java(buf, &self.shuffle_key);
         
         buf.put_i32(self.partition_unique_ids.len() as i32);
         for id in &self.partition_unique_ids {
-            encode_string(buf, id);
+            encode_string_java(buf, id);
         }
         
         buf.put_i32(self.batch_offsets.len() as i32);
         for offset in &self.batch_offsets {
             buf.put_i32(*offset);
         }
-        
-        buf.put_i32(self.body.len() as i32);
-        buf.put_slice(&self.body);
+        // Note: body is NOT encoded here - it's sent separately
     }
 }
 

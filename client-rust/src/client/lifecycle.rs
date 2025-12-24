@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
+use futures::future::join_all;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -147,7 +148,8 @@ impl LifecycleManager {
 
     /// Register a new shuffle.
     ///
-    /// This sends a RequestSlots message to the Master to allocate partition locations.
+    /// This sends a RequestSlots message to the Master to allocate partition locations,
+    /// then sends ReserveSlots to each Worker to prepare for data push.
     /// Note: In Celeborn, RegisterShuffle is handled by LifecycleManager (client-side),
     /// while RequestSlots is the actual RPC to Master for slot allocation.
     pub async fn register_shuffle(
@@ -169,7 +171,17 @@ impl LifecycleManager {
         // Create partition ID list
         let partition_id_list: Vec<i32> = (0..num_partitions).collect();
 
+        let user_identifier = PbUserIdentifier {
+            tenant_id: "default".to_string(),
+            name: "default".to_string(),
+        };
+
         // Request slots from Master
+        // Storage type masks:
+        // - MEMORY_MASK = 0b1 = 1
+        // - LOCAL_DISK_MASK = 0b10 = 2
+        // - HDFS_MASK = 0b100 = 4
+        // - ALL_TYPES_AVAILABLE_MASK = 0 (means all types available)
         let request = PbRequestSlots {
             application_id: self.config.app_id.clone(),
             shuffle_id,
@@ -177,14 +189,11 @@ impl LifecycleManager {
             hostname: gethostname::gethostname().to_string_lossy().to_string(),
             should_replicate: self.config.push_replicate_enabled,
             request_id: Uuid::new_v4().to_string(),
-            storage_type: 0, // Default storage type
-            user_identifier: Some(PbUserIdentifier {
-                tenant_id: "default".to_string(),
-                name: "default".to_string(),
-            }),
+            storage_type: 0, // Default storage type (MEMORY)
+            user_identifier: Some(user_identifier.clone()),
             should_rack_aware: false,
             max_workers: 0, // 0 means no limit
-            available_storage_types: 1, // MEMORY = 1
+            available_storage_types: 2, // LOCAL_DISK_MASK = 2 (for local disk storage)
         };
 
         let response: PbRequestSlotsResponse = self
@@ -203,24 +212,125 @@ impl LifecycleManager {
         // Create shuffle state
         let state = Arc::new(ShuffleState::new(num_mappers, num_partitions));
 
-        // Store partition locations from worker resources
-        for (_worker_id, worker_resource) in response.worker_resource {
-            for pb_location in worker_resource.primary_partitions {
-                let location = self.convert_partition_location(&pb_location);
+        // Group partition locations by worker for ReserveSlots calls
+        // Key: (host, rpc_port), Value: (primary_locations, replica_locations)
+        let mut worker_locations: HashMap<(String, i32), (Vec<PbPartitionLocation>, Vec<PbPartitionLocation>)> = HashMap::new();
+
+        // Store partition locations from worker resources and group by worker
+        for (_worker_id, worker_resource) in &response.worker_resource {
+            for pb_location in &worker_resource.primary_partitions {
+                // Debug: log the storage info from Master
+                if let Some(ref storage) = pb_location.storage_info {
+                    debug!(
+                        "Primary partition {} storage_info: type={}, mount_point={}, available_storage_types={}",
+                        pb_location.id, storage.r#type, storage.mount_point, storage.available_storage_types
+                    );
+                } else {
+                    debug!("Primary partition {} has no storage_info", pb_location.id);
+                }
+                
+                let location = self.convert_partition_location(pb_location);
+                let key = (location.host.clone(), location.rpc_port);
+                worker_locations
+                    .entry(key)
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .0
+                    .push(pb_location.clone());
                 state
                     .partition_locations
                     .entry(location.id)
                     .or_insert_with(Vec::new)
                     .push(location);
             }
-            for pb_location in worker_resource.replica_partitions {
-                let location = self.convert_partition_location(&pb_location);
+            for pb_location in &worker_resource.replica_partitions {
+                let location = self.convert_partition_location(pb_location);
+                let key = (location.host.clone(), location.rpc_port);
+                worker_locations
+                    .entry(key)
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .1
+                    .push(pb_location.clone());
                 state
                     .partition_locations
                     .entry(location.id)
                     .or_insert_with(Vec::new)
                     .push(location);
             }
+        }
+
+        // Send ReserveSlots to each Worker
+        let reserve_futures: Vec<_> = worker_locations
+            .into_iter()
+            .map(|((host, rpc_port), (primary_locs, replica_locs))| {
+                let client = self.transport_client.clone();
+                let app_id = self.config.app_id.clone();
+                let user_id = user_identifier.clone();
+                let push_timeout = self.config.push_timeout.as_millis() as i64;
+                
+                async move {
+                    let request = PbReserveSlots {
+                        application_id: app_id,
+                        shuffle_id,
+                        primary_locations: primary_locs,
+                        replica_locations: replica_locs,
+                        split_threshold: 256 * 1024 * 1024, // 256MB default
+                        split_mode: 0, // SOFT split mode
+                        partition_type: 0, // REDUCE partition type
+                        range_read_filter: false,
+                        user_identifier: Some(user_id),
+                        push_data_timeout: push_timeout,
+                        partition_split_enabled: true,
+                        available_storage_types: 2, // LOCAL_DISK_MASK = 2
+                    };
+
+                    debug!("Sending ReserveSlots to worker {}:{}", host, rpc_port);
+                    let result = client
+                        .send_to_worker::<_, PbReserveSlotsResponse>(
+                            &host,
+                            rpc_port,
+                            TransportMessageType::ReserveSlots,
+                            &request,
+                        )
+                        .await;
+                    (host, rpc_port, result)
+                }
+            })
+            .collect();
+
+        // Execute ReserveSlots in parallel
+        let results = join_all(reserve_futures).await;
+
+        // Check results
+        let mut failed_workers = Vec::new();
+        for (host, port, result) in results {
+            match result {
+                Ok(response) => {
+                    let status = StatusCode::from(response.status);
+                    if status.is_success() {
+                        debug!("ReserveSlots succeeded for worker {}:{}", host, port);
+                    } else {
+                        warn!(
+                            "ReserveSlots failed for worker {}:{}: {:?} - {}",
+                            host, port, status, response.reason
+                        );
+                        failed_workers.push((host, port, response.reason));
+                    }
+                }
+                Err(e) => {
+                    warn!("ReserveSlots error for worker {}:{}: {}", host, port, e);
+                    failed_workers.push((host, port, e.to_string()));
+                }
+            }
+        }
+
+        if !failed_workers.is_empty() {
+            // For now, we log the failures but continue
+            // In a production implementation, we might want to retry or fail
+            warn!(
+                "ReserveSlots failed for {} workers: {:?}",
+                failed_workers.len(),
+                failed_workers
+            );
         }
 
         state.registered.store(true, Ordering::Relaxed);
@@ -303,46 +413,113 @@ impl LifecycleManager {
         }
     }
 
-    /// Request Master to commit files for a shuffle.
+    /// Request Workers to commit files for a shuffle.
     ///
     /// This should be called after all mappers have finished.
     pub async fn request_commit_files(&self, shuffle_id: i32) -> Result<PbCommitFilesResponse> {
         info!("Requesting commit files for shuffle {}", shuffle_id);
         
-        let (committed_ids, map_attempts) = {
-            let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
-                CelebornError::ShuffleNotFound(shuffle_id)
-            })?;
+        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+            CelebornError::ShuffleNotFound(shuffle_id)
+        })?;
+
+        // Group committed IDs by worker
+        let mut worker_to_ids: HashMap<(String, i32), (Vec<String>, Vec<String>)> = HashMap::new();
+        
+        // Iterate over all partition locations to find which ones are committed and which worker handles them
+        for entry in state.partition_locations.iter() {
+            for loc in entry.value() {
+                let unique_id = loc.unique_id();
+                if state.committed_ids.contains(&unique_id) {
+                    let key = (loc.host.clone(), loc.rpc_port);
+                    let entry = worker_to_ids.entry(key).or_insert((Vec::new(), Vec::new()));
+                    if loc.mode == PartitionMode::Primary {
+                        entry.0.push(unique_id);
+                    } else {
+                        entry.1.push(unique_id);
+                    }
+                }
+            }
+        }
+        
+        // Prepare requests
+        let map_attempts = vec![0; state.num_mappers as usize]; // Simplified
+        let mut futures = Vec::new();
+        
+        for ((host, port), (primary_ids, replica_ids)) in worker_to_ids {
+            if primary_ids.is_empty() && replica_ids.is_empty() {
+                continue;
+            }
             
-            let ids: Vec<String> = state.committed_ids.iter().map(|k| k.clone()).collect();
-            // Assuming simplified map attempts for now - in full impl we'd track per map
-            let attempts = vec![0; state.num_mappers as usize];
-            (ids, attempts)
+            let request = PbCommitFiles {
+                application_id: self.config.app_id.clone(),
+                shuffle_id,
+                primary_ids,
+                replica_ids,
+                map_attempts: map_attempts.clone(),
+                epoch: 0,
+                mock_failure: false,
+            };
+            
+            let client = self.transport_client.clone();
+            let host_clone = host.clone();
+            
+            futures.push(async move {
+                let result = client.send_to_worker::<_, PbCommitFilesResponse>(
+                    &host_clone,
+                    port,
+                    TransportMessageType::CommitFiles,
+                    &request
+                ).await;
+                (result, host_clone, port)
+            });
+        }
+        
+        // Execute in parallel
+        let results = join_all(futures).await;
+        
+        // Aggregate results
+        let mut response = PbCommitFilesResponse {
+            status: StatusCode::Success as i32,
+            committed_primary_ids: Vec::new(),
+            committed_replica_ids: Vec::new(),
+            failed_primary_ids: Vec::new(),
+            failed_replica_ids: Vec::new(),
+            committed_primary_storage_infos: HashMap::new(),
+            committed_replica_storage_infos: HashMap::new(),
+            total_written: 0,
+            file_count: 0,
         };
         
-        // We put all committed IDs as primary for now.
-        // In a full implementation, we would distinguish primary/replica.
-        let request = PbCommitFiles {
-            application_id: self.config.app_id.clone(),
-            shuffle_id,
-            primary_ids: committed_ids.clone(),
-            replica_ids: vec![], // TODO: Track replica IDs
-            map_attempts,
-            epoch: 0,
-            mock_failure: false,
-        };
-
-        let response: PbCommitFilesResponse = self
-            .transport_client
-            .send_to_master(TransportMessageType::CommitFiles, &request)
-            .await?;
-
-        let status = StatusCode::from(response.status);
-        if !status.is_success() {
-            warn!(
-                "Commit files failed for shuffle {}: {:?}",
-                shuffle_id, status
-            );
+        let mut total_failures = 0;
+        
+        for (res, host, port) in results {
+            match res {
+                Ok(r) => {
+                    let status = StatusCode::from(r.status);
+                    if !status.is_success() {
+                        total_failures += 1;
+                        warn!("Worker {}:{} returned status {:?}", host, port, status);
+                    }
+                    response.committed_primary_ids.extend(r.committed_primary_ids);
+                    response.committed_replica_ids.extend(r.committed_replica_ids);
+                    response.failed_primary_ids.extend(r.failed_primary_ids);
+                    response.failed_replica_ids.extend(r.failed_replica_ids);
+                }
+                Err(e) => {
+                    total_failures += 1;
+                    warn!("Failed to commit files on worker {}:{}: {}", host, port, e);
+                }
+            }
+        }
+        
+        if total_failures > 0 {
+            warn!("Commit files completed with {} worker failures", total_failures);
+            if response.committed_primary_ids.is_empty() && response.committed_replica_ids.is_empty() {
+                response.status = StatusCode::RequestFailed as i32;
+            } else {
+                response.status = StatusCode::PartialSuccess as i32;
+            }
         } else {
             info!(
                 "Commit files successful for shuffle {}: {} primary, {} replica committed",

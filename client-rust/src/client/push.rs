@@ -307,9 +307,9 @@ impl DataPusher {
 
         let conn = self.push_connection_pool.get_connection(addr).await?;
 
-        // Encode and send
-        let mut buf = push_data.encode_to_bytes();
-        let frame = Frame::new(MessageType::PushData, buf.freeze().slice(1..));
+        // Encode message (without body) and send with body as separate frame part
+        let message_buf = push_data.encode_to_bytes();
+        let frame = Frame::with_body(MessageType::PushData, message_buf.freeze(), data.clone());
 
         conn.send_one_way(frame).await?;
 
@@ -393,9 +393,10 @@ impl DataPusher {
 
         let conn = self.push_connection_pool.get_connection(addr).await?;
 
-        // Encode and send
-        let mut buf = push_merged.encode_to_bytes();
-        let frame = Frame::new(MessageType::PushMergedData, buf.freeze().slice(1..));
+        // Encode message (without body) and send with body as separate frame part
+        let body = push_merged.body.clone();
+        let message_buf = push_merged.encode_to_bytes();
+        let frame = Frame::with_body(MessageType::PushMergedData, message_buf.freeze(), body);
 
         conn.send_one_way(frame).await?;
 
