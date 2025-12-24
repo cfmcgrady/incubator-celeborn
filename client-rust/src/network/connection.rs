@@ -140,11 +140,23 @@ impl Connection {
     }
 
     /// Extract request ID from a frame.
-    /// The request ID is in the message content (first 8 bytes).
+    /// For RPC responses, the request ID is in the message content (first 8 bytes).
+    /// For ChunkFetchSuccess/Failure, we use the stream_id as a pseudo request ID.
     fn extract_request_id(frame: &Frame) -> Option<i64> {
         match frame.message_type {
             MessageType::RpcResponse | MessageType::RpcFailure => {
                 // Request ID is in the message content (first 8 bytes)
+                if frame.message.len() >= 8 {
+                    let bytes: [u8; 8] = frame.message[..8].try_into().ok()?;
+                    Some(i64::from_be_bytes(bytes))
+                } else {
+                    None
+                }
+            }
+            MessageType::ChunkFetchSuccess | MessageType::ChunkFetchFailure => {
+                // For ChunkFetchSuccess/Failure, the message contains StreamChunkSlice:
+                // streamId (8 bytes) + chunkIndex (4 bytes) + offset (4 bytes) + len (4 bytes)
+                // We use streamId as the request ID for matching
                 if frame.message.len() >= 8 {
                     let bytes: [u8; 8] = frame.message[..8].try_into().ok()?;
                     Some(i64::from_be_bytes(bytes))
@@ -216,6 +228,59 @@ impl Connection {
             .send(frame)
             .await
             .map_err(|_| CelebornError::Connection("Failed to send message".to_string()))
+    }
+
+    /// Send a ChunkFetchRequest and wait for ChunkFetchSuccess response.
+    /// The response is matched by stream_id, not request_id.
+    pub async fn fetch_chunk(
+        &self,
+        body: Bytes,
+        stream_id: i64,
+        timeout_duration: Duration,
+    ) -> Result<Frame> {
+        if !self.active.load(Ordering::Relaxed) {
+            return Err(CelebornError::Connection("Connection is closed".to_string()));
+        }
+
+        // Acquire semaphore permit
+        let _permit = self
+            .in_flight_semaphore
+            .acquire()
+            .await
+            .map_err(|_| CelebornError::Connection("Semaphore closed".to_string()))?;
+
+        let request_id = self.request_id_counter.fetch_add(1, Ordering::Relaxed) as i64;
+        
+        // Create the RPC request and encode for frame
+        let request = RpcRequest::new(request_id, body);
+        let (message_content, body_content) = request.encode_for_frame();
+        
+        // Create frame with separate message content and body
+        let frame = Frame::with_body(MessageType::RpcRequest, message_content, body_content);
+
+        // Register pending request using stream_id as the key
+        // (ChunkFetchSuccess response uses stream_id, not request_id)
+        let (tx, rx) = oneshot::channel();
+        self.pending_requests.insert(stream_id, tx);
+
+        // Send the frame
+        self.sender
+            .send(frame)
+            .await
+            .map_err(|_| CelebornError::Connection("Failed to send request".to_string()))?;
+
+        // Wait for response with timeout
+        match timeout(timeout_duration, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => {
+                self.pending_requests.remove(&stream_id);
+                Err(CelebornError::Connection("Request cancelled".to_string()))
+            }
+            Err(_) => {
+                self.pending_requests.remove(&stream_id);
+                Err(CelebornError::Timeout(timeout_duration.as_millis() as u64))
+            }
+        }
     }
 
     /// Check if the connection is active.

@@ -19,16 +19,18 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
+use prost::Message;
 use tracing::{debug, trace, warn};
 
 use crate::config::{CelebornConfig, CompressionCodec};
 use crate::error::{CelebornError, Result};
 use crate::network::{Connection, ConnectionPool, TransportClient};
-use crate::protocol::message::{
-    ChunkFetchRequest, ChunkFetchSuccess, MessageType, OpenStream, StreamHandle,
+use crate::protocol::generated::{
+    MessageType as PbMessageType, PbChunkFetchRequest, PbOpenStream, PbStreamChunkSlice,
+    PbStreamHandler,
 };
-use crate::protocol::{Decodable, Encodable, PartitionLocation};
+use crate::protocol::{decode_transport_message, encode_transport_message, PartitionLocation};
 
 /// Iterator for reading shuffle data chunks.
 pub struct ShuffleDataIterator {
@@ -186,54 +188,62 @@ impl ShuffleDataIterator {
 
         let connection = self.connection_pool.get_connection(addr).await?;
 
-        // Get file path from storage info
-        let file_name = location
-            .storage_info
-            .as_ref()
-            .map(|s| s.file_path.clone())
-            .unwrap_or_else(|| format!("{}/{}", self.shuffle_key, location.unique_id()));
+        // Get file name using the partition location's method
+        // Format: {id}-{epoch}-{mode} e.g., "0-0-primary"
+        let file_name = location.get_file_name();
 
-        let open_stream = OpenStream {
+        // Create PbOpenStream protobuf message
+        let open_stream = PbOpenStream {
             shuffle_key: self.shuffle_key.clone(),
             file_name,
             start_index: 0,
             end_index: i32::MAX,
+            initial_credit: 0,
+            read_local_shuffle: false,
         };
 
-        // Send open stream request
-        // Encode the OpenStream message (skip the type byte, as it's handled by the frame)
-        let buf = open_stream.encode_to_bytes();
-        let body = buf.freeze().slice(1..); // Skip message type byte
+        // Encode as TransportMessage: messageType (4 bytes) + payloadLen (4 bytes) + protobuf payload
+        let transport_msg = encode_transport_message(PbMessageType::OpenStream as i32, &open_stream);
+
+        debug!(
+            "Sending OpenStream request for partition {} to {}",
+            location.unique_id(),
+            addr
+        );
 
         let response = connection
-            .send_rpc(body, self.config.fetch_timeout)
+            .send_rpc(transport_msg.freeze(), self.config.fetch_timeout)
             .await?;
 
-        // Parse stream handle response
-        if response.message_type != MessageType::StreamHandle {
+        // The response body contains the TransportMessage (messageType + payloadLen + payload)
+        // The response.message contains RpcResponse header (requestId + bodySize) which we don't need
+        let mut payload = Bytes::copy_from_slice(&response.body);
+
+        // Decode TransportMessage response from body
+        let (msg_type, pb_payload) = decode_transport_message(&mut payload)?;
+
+        if msg_type != PbMessageType::StreamHandler as i32 {
             return Err(CelebornError::Protocol(format!(
-                "Expected StreamHandle, got {:?}",
-                response.message_type
+                "Expected StreamHandler ({}), got message type {}",
+                PbMessageType::StreamHandler as i32,
+                msg_type
             )));
         }
 
-        // Combine message and body for decoding
-        let mut combined = bytes::BytesMut::new();
-        combined.extend_from_slice(&response.message);
-        combined.extend_from_slice(&response.body);
-        let mut payload = combined.freeze();
-        let stream_handle = StreamHandle::decode(&mut payload)?;
+        // Decode PbStreamHandler from protobuf payload
+        let stream_handler = PbStreamHandler::decode(pb_payload)
+            .map_err(|e| CelebornError::Protocol(format!("Failed to decode PbStreamHandler: {}", e)))?;
 
         debug!(
             "Opened stream {} with {} chunks for partition {}",
-            stream_handle.stream_id,
-            stream_handle.num_chunks,
+            stream_handler.stream_id,
+            stream_handler.num_chunks,
             location.unique_id()
         );
 
         Ok(StreamState {
-            stream_id: stream_handle.stream_id,
-            num_chunks: stream_handle.num_chunks,
+            stream_id: stream_handler.stream_id,
+            num_chunks: stream_handler.num_chunks,
             current_chunk: 0,
             connection,
             location: location.clone(),
@@ -247,49 +257,113 @@ impl ShuffleDataIterator {
         chunk_index: i32,
         connection: &Arc<Connection>,
     ) -> Result<Option<Bytes>> {
-        let request = ChunkFetchRequest {
+        debug!(
+            "Fetching chunk {} from stream {}",
+            chunk_index, stream_id
+        );
+
+        // Create PbChunkFetchRequest protobuf message
+        let chunk_slice = PbStreamChunkSlice {
             stream_id,
             chunk_index,
             offset: 0,
-            len: 0, // 0 means fetch entire chunk
+            len: i32::MAX, // Use MAX_VALUE to fetch entire chunk (same as Java client)
+        };
+        let request = PbChunkFetchRequest {
+            stream_chunk_slice: Some(chunk_slice),
         };
 
-        let buf = request.encode_to_bytes();
-        let body = buf.freeze().slice(1..); // Skip message type byte
+        // Encode as TransportMessage
+        let transport_msg = encode_transport_message(PbMessageType::ChunkFetchRequest as i32, &request);
 
+        debug!(
+            "Sending ChunkFetchRequest for stream {} chunk {}, msg size: {}",
+            stream_id, chunk_index, transport_msg.len()
+        );
+
+        // Use fetch_chunk which registers the pending request with stream_id
+        // (ChunkFetchSuccess response uses stream_id for matching, not request_id)
         let response = connection
-            .send_rpc(body, config.fetch_timeout)
+            .fetch_chunk(transport_msg.freeze(), stream_id, config.fetch_timeout)
             .await?;
 
+        debug!(
+            "Received response for chunk fetch: type={:?}, message_len={}, body_len={}",
+            response.message_type, response.message.len(), response.body.len()
+        );
+
+        // Check the response message type
         match response.message_type {
-            MessageType::ChunkFetchSuccess => {
-                // Combine message and body for decoding
-                let mut combined = bytes::BytesMut::new();
-                combined.extend_from_slice(&response.message);
-                combined.extend_from_slice(&response.body);
-                let mut payload = combined.freeze();
-                let success = ChunkFetchSuccess::decode(&mut payload)?;
-                
-                trace!(
-                    "Fetched chunk {} ({} bytes) from stream {}",
-                    success.chunk_index,
-                    success.body.len(),
-                    success.stream_id
-                );
-                
-                Ok(Some(success.body))
+            crate::protocol::message::MessageType::ChunkFetchSuccess => {
+                // ChunkFetchSuccess format:
+                // message: StreamChunkSlice (20 bytes) = streamId (8) + chunkIndex (4) + offset (4) + len (4)
+                // body: chunk data containing one or more batches
+                // Each batch has a 16-byte header (little-endian):
+                //   mapId (4) + attemptId (4) + batchId (4) + dataSize (4)
+                // followed by the actual data
+                if !response.body.is_empty() {
+                    trace!(
+                        "Fetched chunk {} ({} bytes) from stream {}",
+                        chunk_index,
+                        response.body.len(),
+                        stream_id
+                    );
+                    // Parse batches and extract data
+                    let data = Self::parse_chunk_batches(&response.body)?;
+                    return Ok(Some(data));
+                }
+                Ok(None)
             }
-            MessageType::ChunkFetchFailure => {
+            crate::protocol::message::MessageType::ChunkFetchFailure => {
+                // ChunkFetchFailure format:
+                // message: StreamChunkSlice (20 bytes) + error message
                 Err(CelebornError::FetchFailed(format!(
                     "Chunk fetch failed for stream {} chunk {}",
                     stream_id, chunk_index
                 )))
             }
-            _ => Err(CelebornError::Protocol(format!(
-                "Unexpected response type: {:?}",
-                response.message_type
-            ))),
+            _ => {
+                warn!(
+                    "Unexpected response type {:?} for chunk fetch",
+                    response.message_type
+                );
+                Ok(None)
+            }
         }
+    }
+
+    /// Parse chunk data containing one or more batches.
+    /// Each batch has a 16-byte header (little-endian):
+    ///   mapId (4) + attemptId (4) + batchId (4) + dataSize (4)
+    /// followed by the actual data of `dataSize` bytes.
+    fn parse_chunk_batches(chunk_data: &[u8]) -> Result<Bytes> {
+        let mut result = Vec::new();
+        let mut offset = 0;
+        
+        const BATCH_HEADER_SIZE: usize = 16;
+        
+        while offset + BATCH_HEADER_SIZE <= chunk_data.len() {
+            // Read batch header (little-endian)
+            let _map_id = i32::from_le_bytes(chunk_data[offset..offset+4].try_into().unwrap());
+            let _attempt_id = i32::from_le_bytes(chunk_data[offset+4..offset+8].try_into().unwrap());
+            let _batch_id = i32::from_le_bytes(chunk_data[offset+8..offset+12].try_into().unwrap());
+            let data_size = i32::from_le_bytes(chunk_data[offset+12..offset+16].try_into().unwrap()) as usize;
+            
+            offset += BATCH_HEADER_SIZE;
+            
+            // Extract data
+            if offset + data_size > chunk_data.len() {
+                return Err(CelebornError::Protocol(format!(
+                    "Batch data size {} exceeds remaining chunk data {} at offset {}",
+                    data_size, chunk_data.len() - offset, offset
+                )));
+            }
+            
+            result.extend_from_slice(&chunk_data[offset..offset + data_size]);
+            offset += data_size;
+        }
+        
+        Ok(Bytes::from(result))
     }
 
     /// Decompress data using the configured codec.

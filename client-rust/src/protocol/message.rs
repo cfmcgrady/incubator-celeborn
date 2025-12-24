@@ -932,11 +932,11 @@ mod tests {
     #[test]
     fn test_rpc_request_encode_decode() {
         let request = RpcRequest::new(12345, Bytes::from("test body"));
-        let mut buf = request.encode_to_bytes();
+        let buf = request.encode_to_bytes();
         
-        // Skip message type byte
+        // RpcRequest::encode() includes message type byte (legacy format)
         let mut bytes = buf.freeze();
-        let _ = bytes.get_u8();
+        let _ = bytes.get_u8(); // Skip message type byte
         
         let decoded = RpcRequest::decode(&mut bytes).unwrap();
         assert_eq!(decoded.request_id, 12345);
@@ -952,17 +952,18 @@ mod tests {
             "0-0".to_string(),
             Bytes::from(vec![1u8, 2, 3, 4, 5]),
         );
-        let mut buf = push_data.encode_to_bytes();
+        let buf = push_data.encode_to_bytes();
         
-        // Skip message type byte
+        // encode_to_bytes does NOT include message type byte
+        // Note: body is NOT included in encode() - it's sent separately in the frame
         let mut bytes = buf.freeze();
-        let _ = bytes.get_u8();
         
         let decoded = PushData::decode(&mut bytes).unwrap();
         assert_eq!(decoded.request_id, 1);
         assert_eq!(decoded.mode, 0);
         assert_eq!(decoded.shuffle_key, "app-1");
         assert_eq!(decoded.partition_unique_id, "0-0");
-        assert_eq!(decoded.body, Bytes::from(vec![1u8, 2, 3, 4, 5]));
+        // Body will be empty since encode() doesn't include it
+        assert_eq!(decoded.body, Bytes::new());
     }
 }

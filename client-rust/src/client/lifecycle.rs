@@ -18,7 +18,7 @@
 //! Manages shuffle registration, heartbeats, and partition locations.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
@@ -47,6 +47,8 @@ struct ShuffleState {
     registered: AtomicBool,
     /// Committed partition IDs (unique_id)
     committed_ids: DashSet<String>,
+    /// Batch ID counters per partition (partition_id -> counter)
+    batch_id_counters: DashMap<i32, AtomicI32>,
 }
 
 impl ShuffleState {
@@ -57,6 +59,7 @@ impl ShuffleState {
             partition_locations: DashMap::new(),
             registered: AtomicBool::new(false),
             committed_ids: DashSet::new(),
+            batch_id_counters: DashMap::new(),
         }
     }
 }
@@ -667,6 +670,23 @@ impl LifecycleManager {
     /// Add file count.
     pub fn add_file_count(&self, count: i64) {
         self.file_count.fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Get the next batch ID for a partition.
+    ///
+    /// Each partition maintains its own batch ID counter that increments
+    /// with each push operation. This is used in the batch header format
+    /// expected by Celeborn Worker.
+    pub fn next_batch_id(&self, shuffle_id: i32, partition_id: i32) -> i32 {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            let counter = state.batch_id_counters
+                .entry(partition_id)
+                .or_insert_with(|| AtomicI32::new(0));
+            counter.fetch_add(1, Ordering::Relaxed)
+        } else {
+            // If shuffle not found, return 0 (shouldn't happen in normal flow)
+            0
+        }
     }
 
     /// Check if a worker is excluded.

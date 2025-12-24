@@ -28,6 +28,7 @@
 
 use std::env;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use celeborn_client::config::CelebornConfig;
 use celeborn_client::network::TransportClient;
@@ -75,7 +76,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     lifecycle_manager.start_heartbeat().await;
 
     // 2. Register Shuffle
-    let shuffle_id = 100;
+    // Use a random shuffle ID based on current time to avoid conflicts with previous runs
+    let shuffle_id = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() % 100000) as i32;
     let num_mappers = 1;
     let num_partitions = 1;
 

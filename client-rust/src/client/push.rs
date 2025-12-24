@@ -133,6 +133,13 @@ impl DataPusher {
     }
 
     /// Push data to a partition.
+    ///
+    /// The data body format expected by Celeborn Worker is:
+    /// - mapId: 4 bytes (int)
+    /// - attemptId: 4 bytes (int)
+    /// - batchId: 4 bytes (int)
+    /// - compressedTotalSize: 4 bytes (int)
+    /// - data: remaining bytes
     pub async fn push_data(
         &self,
         shuffle_id: i32,
@@ -162,10 +169,25 @@ impl DataPusher {
         // Compress data if needed
         let compressed_data = self.compress_data(data)?;
 
+        // Build body with batch header: mapId (4) + attemptId (4) + batchId (4) + compressedTotalSize (4) + data
+        // BATCH_HEADER_SIZE = 16 bytes
+        // Note: Java's Platform.getInt uses native endian (little-endian on x86/x64),
+        // so we must use little-endian encoding for the batch header.
+        let batch_id = self.lifecycle_manager.next_batch_id(shuffle_id, partition_id);
+        let compressed_size = compressed_data.len() as i32;
+        
+        let mut body_with_header = BytesMut::with_capacity(16 + compressed_data.len());
+        body_with_header.put_i32_le(map_id);
+        body_with_header.put_i32_le(attempt_id);
+        body_with_header.put_i32_le(batch_id);
+        body_with_header.put_i32_le(compressed_size);
+        body_with_header.put_slice(&compressed_data);
+        let body_bytes = body_with_header.freeze();
+
         // Check if we need to flush existing buffer
         let should_flush = {
             if let Some(buffer) = self.pending_buffers.get(&buffer_key) {
-                buffer.remaining_capacity() < compressed_data.len()
+                buffer.remaining_capacity() < body_bytes.len()
             } else {
                 false
             }
@@ -176,13 +198,13 @@ impl DataPusher {
         }
 
         // Add to buffer or send directly
-        if compressed_data.len() >= self.config.push_buffer_size {
+        if body_bytes.len() >= self.config.push_buffer_size {
             // Send directly for large data
             self.send_push_data(
                 &shuffle_key,
                 &partition_unique_id,
                 location,
-                Bytes::copy_from_slice(&compressed_data),
+                body_bytes,
             )
             .await?;
         } else {
@@ -195,7 +217,7 @@ impl DataPusher {
                     self.config.push_buffer_size,
                 )
             });
-            buffer.append(&compressed_data);
+            buffer.append(&body_bytes);
 
             // Flush if buffer is full
             if buffer.is_full() {

@@ -120,10 +120,21 @@ impl Decoder for CelebornCodec {
                 return Ok(None);
             }
 
+            // Debug: log raw header bytes
+            tracing::trace!(
+                "Raw header bytes: {:02x?}",
+                &src[..HEADER_SIZE]
+            );
+
             // Parse header
             let msg_size = src.get_u32() as usize;
             let msg_type_id = src.get_u8();
             let body_size = src.get_u32() as usize;
+            
+            tracing::debug!(
+                "Decoded header: msg_size={}, msg_type_id={}, body_size={}, remaining_in_buffer={}",
+                msg_size, msg_type_id, body_size, src.len()
+            );
 
             let total_frame_size = msg_size + body_size;
             if total_frame_size > MAX_FRAME_SIZE {
