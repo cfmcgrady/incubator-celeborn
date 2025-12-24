@@ -24,7 +24,6 @@ use tracing::{debug, trace, warn};
 
 use crate::config::{CelebornConfig, CompressionCodec};
 use crate::error::{CelebornError, Result};
-use crate::network::codec::Frame;
 use crate::network::{Connection, ConnectionPool, TransportClient};
 use crate::protocol::message::{
     ChunkFetchRequest, ChunkFetchSuccess, MessageType, OpenStream, StreamHandle,
@@ -202,11 +201,12 @@ impl ShuffleDataIterator {
         };
 
         // Send open stream request
-        let mut buf = open_stream.encode_to_bytes();
-        let frame = Frame::new(MessageType::OpenStream, buf.freeze().slice(1..));
+        // Encode the OpenStream message (skip the type byte, as it's handled by the frame)
+        let buf = open_stream.encode_to_bytes();
+        let body = buf.freeze().slice(1..); // Skip message type byte
 
         let response = connection
-            .send_rpc(frame.payload, self.config.fetch_timeout)
+            .send_rpc(body, self.config.fetch_timeout)
             .await?;
 
         // Parse stream handle response
@@ -217,7 +217,11 @@ impl ShuffleDataIterator {
             )));
         }
 
-        let mut payload = response.payload;
+        // Combine message and body for decoding
+        let mut combined = bytes::BytesMut::new();
+        combined.extend_from_slice(&response.message);
+        combined.extend_from_slice(&response.body);
+        let mut payload = combined.freeze();
         let stream_handle = StreamHandle::decode(&mut payload)?;
 
         debug!(
@@ -251,15 +255,19 @@ impl ShuffleDataIterator {
         };
 
         let buf = request.encode_to_bytes();
-        let frame = Frame::new(MessageType::ChunkFetchRequest, buf.freeze().slice(1..));
+        let body = buf.freeze().slice(1..); // Skip message type byte
 
         let response = connection
-            .send_rpc(frame.payload, config.fetch_timeout)
+            .send_rpc(body, config.fetch_timeout)
             .await?;
 
         match response.message_type {
             MessageType::ChunkFetchSuccess => {
-                let mut payload = response.payload;
+                // Combine message and body for decoding
+                let mut combined = bytes::BytesMut::new();
+                combined.extend_from_slice(&response.message);
+                combined.extend_from_slice(&response.body);
+                let mut payload = combined.freeze();
                 let success = ChunkFetchSuccess::decode(&mut payload)?;
                 
                 trace!(

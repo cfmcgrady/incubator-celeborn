@@ -89,11 +89,17 @@ pub trait Message: Encodable {
 }
 
 /// RPC request message.
+///
+/// Wire format (message content only, body is separate):
+/// - request_id: i64 (8 bytes)
+/// - body_size: i32 (4 bytes) - size of the body
+///
+/// The actual body is transmitted separately in the frame's body section.
 #[derive(Debug, Clone)]
 pub struct RpcRequest {
     /// Unique request ID
     pub request_id: i64,
-    /// Request body
+    /// Request body (protobuf payload)
     pub body: Bytes,
 }
 
@@ -101,14 +107,30 @@ impl RpcRequest {
     pub fn new(request_id: i64, body: Bytes) -> Self {
         Self { request_id, body }
     }
+
+    /// Encode the message content (without body).
+    /// Returns (message_content, body) for frame encoding.
+    pub fn encode_for_frame(&self) -> (Bytes, Bytes) {
+        let mut msg = BytesMut::with_capacity(12);
+        msg.put_i64(self.request_id);
+        msg.put_i32(self.body.len() as i32);
+        (msg.freeze(), self.body.clone())
+    }
+
+    /// Get the message content length (without body).
+    pub fn message_content_length(&self) -> usize {
+        12 // request_id (8) + body_size (4)
+    }
 }
 
 impl Encodable for RpcRequest {
     fn encoded_length(&self) -> usize {
-        8 + 4 + self.body.len() // request_id + body_length + body
+        // For legacy compatibility - includes body
+        8 + 4 + self.body.len()
     }
 
     fn encode(&self, buf: &mut BytesMut) {
+        // Legacy encode - includes message type and body
         buf.put_u8(MessageType::RpcRequest as u8);
         buf.put_i64(self.request_id);
         buf.put_i32(self.body.len() as i32);
@@ -148,17 +170,36 @@ impl Message for RpcRequest {
 }
 
 /// RPC response message.
+///
+/// Wire format (message content only, body is separate):
+/// - request_id: i64 (8 bytes)
+/// - body_size: i32 (4 bytes) - size of the body
+///
+/// The actual body is transmitted separately in the frame's body section.
 #[derive(Debug, Clone)]
 pub struct RpcResponse {
     /// Request ID this is responding to
     pub request_id: i64,
-    /// Response body
+    /// Response body (protobuf payload)
     pub body: Bytes,
 }
 
 impl RpcResponse {
     pub fn new(request_id: i64, body: Bytes) -> Self {
         Self { request_id, body }
+    }
+
+    /// Decode from frame message content and body.
+    pub fn decode_from_frame(message: &mut Bytes, body: Bytes) -> io::Result<Self> {
+        if message.remaining() < 12 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Not enough bytes for RpcResponse message content",
+            ));
+        }
+        let request_id = message.get_i64();
+        let _body_len = message.get_i32(); // Body length is already known from frame
+        Ok(Self { request_id, body })
     }
 }
 

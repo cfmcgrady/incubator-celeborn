@@ -34,9 +34,16 @@ async fn main() -> Result<()> {
         .init();
 
     // Create configuration
+    // Use the actual IP address where Celeborn master is listening
+    // You can find this by running: lsof -i :9097
+    let master_endpoint = std::env::var("CELEBORN_MASTER")
+        .unwrap_or_else(|_| "127.0.0.1:9097".to_string());
+    
+    println!("Connecting to Celeborn master at: {}", master_endpoint);
+    
     let config = CelebornConfig::builder()
         .app_id("rust-example-app")
-        .master_endpoints(vec!["10.27.36.96:9097".to_string()])
+        .master_endpoints(vec![master_endpoint])
         .push_replicate_enabled(false)
         .build()?;
 

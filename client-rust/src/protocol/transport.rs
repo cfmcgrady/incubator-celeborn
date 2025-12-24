@@ -179,24 +179,38 @@ impl TransportMessage {
     }
 
     /// Encode the transport message to bytes.
+    /// Format: messageTypeValue (4B) + payloadLen (4B) + payload
     pub fn encode(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(4 + self.payload.len());
+        let mut buf = BytesMut::with_capacity(4 + 4 + self.payload.len());
         buf.extend_from_slice(&(self.message_type as i32).to_be_bytes());
+        buf.extend_from_slice(&(self.payload.len() as i32).to_be_bytes());
         buf.extend_from_slice(&self.payload);
         buf.freeze()
     }
 
     /// Decode a transport message from bytes.
-    pub fn decode(mut data: Bytes) -> std::io::Result<Self> {
-        if data.len() < 4 {
+    /// Format: messageTypeValue (4B) + payloadLen (4B) + payload
+    pub fn decode(data: Bytes) -> std::io::Result<Self> {
+        if data.len() < 8 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
-                "Not enough bytes for message type",
+                "Not enough bytes for transport message header",
             ));
         }
         let type_bytes: [u8; 4] = data[..4].try_into().unwrap();
         let message_type = TransportMessageType::from(i32::from_be_bytes(type_bytes));
-        let payload = data.split_off(4);
+        
+        let len_bytes: [u8; 4] = data[4..8].try_into().unwrap();
+        let payload_len = i32::from_be_bytes(len_bytes) as usize;
+        
+        if data.len() < 8 + payload_len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("Not enough bytes for payload: expected {}, got {}", payload_len, data.len() - 8),
+            ));
+        }
+        
+        let payload = data.slice(8..8 + payload_len);
         Ok(Self {
             message_type,
             payload,
@@ -623,6 +637,7 @@ mod tests {
         
         let mut payload = Vec::new();
         register.encode(&mut payload).unwrap();
+        let payload_len = payload.len();
         
         let msg = TransportMessage::new(
             TransportMessageType::RegisterShuffle,
@@ -630,6 +645,18 @@ mod tests {
         );
         
         let encoded = msg.encode();
+        
+        // Verify format: messageTypeValue (4B) + payloadLen (4B) + payload
+        assert_eq!(encoded.len(), 4 + 4 + payload_len);
+        
+        // Verify message type
+        let type_bytes: [u8; 4] = encoded[..4].try_into().unwrap();
+        assert_eq!(i32::from_be_bytes(type_bytes), TransportMessageType::RegisterShuffle as i32);
+        
+        // Verify payload length
+        let len_bytes: [u8; 4] = encoded[4..8].try_into().unwrap();
+        assert_eq!(i32::from_be_bytes(len_bytes) as usize, payload_len);
+        
         let decoded = TransportMessage::decode(encoded).unwrap();
         
         assert_eq!(decoded.message_type, TransportMessageType::RegisterShuffle);

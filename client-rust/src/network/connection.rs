@@ -33,7 +33,6 @@ use tracing::{debug, error, trace, warn};
 use crate::error::{CelebornError, Result};
 use crate::network::codec::{CelebornCodec, Frame};
 use crate::protocol::message::{MessageType, RpcRequest};
-use crate::protocol::Encodable;
 
 /// A single connection to a Celeborn server.
 pub struct Connection {
@@ -141,11 +140,13 @@ impl Connection {
     }
 
     /// Extract request ID from a frame.
+    /// The request ID is in the message content (first 8 bytes).
     fn extract_request_id(frame: &Frame) -> Option<i64> {
         match frame.message_type {
             MessageType::RpcResponse | MessageType::RpcFailure => {
-                if frame.payload.len() >= 8 {
-                    let bytes: [u8; 8] = frame.payload[..8].try_into().ok()?;
+                // Request ID is in the message content (first 8 bytes)
+                if frame.message.len() >= 8 {
+                    let bytes: [u8; 8] = frame.message[..8].try_into().ok()?;
                     Some(i64::from_be_bytes(bytes))
                 } else {
                     None
@@ -174,12 +175,12 @@ impl Connection {
 
         let request_id = self.request_id_counter.fetch_add(1, Ordering::Relaxed) as i64;
         
-        // Create the RPC request
+        // Create the RPC request and encode for frame
         let request = RpcRequest::new(request_id, body);
-        let mut buf = request.encode_to_bytes();
+        let (message_content, body_content) = request.encode_for_frame();
         
-        // Create frame (skip the type byte since it's already in the encoded data)
-        let frame = Frame::new(MessageType::RpcRequest, buf.freeze().slice(1..));
+        // Create frame with separate message content and body
+        let frame = Frame::with_body(MessageType::RpcRequest, message_content, body_content);
 
         // Register pending request
         let (tx, rx) = oneshot::channel();

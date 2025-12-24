@@ -182,40 +182,41 @@ impl TransportClient {
     {
         match frame.message_type {
             MessageType::RpcResponse => {
-                // Skip request ID (8 bytes) and body length (4 bytes)
-                if frame.payload.len() < 12 {
-                    return Err(CelebornError::Protocol(
-                        "Response too short".to_string(),
-                    ));
-                }
+                // In the new frame format:
+                // - frame.message contains: request_id (8 bytes) + body_size (4 bytes)
+                // - frame.body contains: the actual protobuf response
                 
-                let body = &frame.payload[12..];
-                
-                // Skip message type (4 bytes) in the body
-                if body.len() < 4 {
+                // The body contains: message_type (4 bytes) + protobuf data
+                if frame.body.len() < 4 {
                     return Err(CelebornError::Protocol(
                         "Response body too short".to_string(),
                     ));
                 }
                 
-                let response_body = &body[4..];
+                // Skip message type (4 bytes) in the body
+                let response_body = &frame.body[4..];
                 
                 Resp::decode(response_body).map_err(|e| {
                     CelebornError::Serialization(format!("Failed to decode response: {}", e))
                 })
             }
             MessageType::RpcFailure => {
-                // Extract error message
-                if frame.payload.len() < 10 {
+                // For RPC failure, the error message is in the message content
+                // Format: request_id (8 bytes) + error_string_length (4 bytes) + error_string
+                if frame.message.len() < 12 {
                     return Err(CelebornError::Protocol(
                         "RPC failure response too short".to_string(),
                     ));
                 }
                 
-                // Skip request ID (8 bytes)
-                let error_len = u16::from_be_bytes([frame.payload[8], frame.payload[9]]) as usize;
-                let error_msg = if frame.payload.len() >= 10 + error_len {
-                    String::from_utf8_lossy(&frame.payload[10..10 + error_len]).to_string()
+                // Skip request ID (8 bytes), read error string length (4 bytes)
+                let error_len = i32::from_be_bytes([
+                    frame.message[8], frame.message[9],
+                    frame.message[10], frame.message[11]
+                ]) as usize;
+                
+                let error_msg = if frame.message.len() >= 12 + error_len {
+                    String::from_utf8_lossy(&frame.message[12..12 + error_len]).to_string()
                 } else {
                     "Unknown error".to_string()
                 };
