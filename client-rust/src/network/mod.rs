@@ -24,5 +24,5 @@ pub mod master_rpc;
 pub mod transport;
 
 pub use connection::{Connection, ConnectionPool};
-pub use master_rpc::MasterRpcClient;
+pub use master_rpc::{MasterRpcClient, NettyRpcClient};
 pub use transport::{TransportClient, TransportClientFactory};

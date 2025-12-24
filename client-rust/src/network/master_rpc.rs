@@ -13,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Master RPC client using Java serialization format.
+//! Netty RPC client using Java serialization format.
 //!
-//! Celeborn Master uses NettyRpcEnv which requires Java serialization for RPC messages.
-//! This module provides a client that can communicate with the Master using the correct
+//! Celeborn Master and Worker both use NettyRpcEnv which requires Java serialization for RPC messages.
+//! This module provides clients that can communicate with both Master and Worker using the correct
 //! wire format.
 
 use std::net::SocketAddr;
@@ -42,107 +42,32 @@ fn next_request_id() -> u64 {
     REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Master RPC client for communicating with Celeborn Master.
-pub struct MasterRpcClient {
-    /// Master endpoints
-    master_endpoints: Vec<SocketAddr>,
-    /// Current master index
-    current_master_index: std::sync::atomic::AtomicUsize,
+/// Common Netty RPC client for communicating with Celeborn servers (Master or Worker).
+/// Both Master and Worker use NettyRpcEnv which requires Java serialization for RPC messages.
+pub struct NettyRpcClient {
     /// Local address for RPC
     local_address: Option<RpcAddress>,
     /// RPC timeout
     rpc_timeout: Duration,
-    /// Max retries
-    max_retries: usize,
-    /// Retry wait duration
-    retry_wait: Duration,
 }
 
-impl MasterRpcClient {
-    /// Create a new Master RPC client.
+impl NettyRpcClient {
+    /// Create a new Netty RPC client.
     pub fn new(
-        master_endpoints: Vec<SocketAddr>,
         local_address: Option<RpcAddress>,
         rpc_timeout: Duration,
-        max_retries: usize,
-        retry_wait: Duration,
-    ) -> Result<Self> {
-        if master_endpoints.is_empty() {
-            return Err(CelebornError::Config(
-                "No master endpoints provided".to_string(),
-            ));
-        }
-
-        Ok(Self {
-            master_endpoints,
-            current_master_index: std::sync::atomic::AtomicUsize::new(0),
+    ) -> Self {
+        Self {
             local_address,
             rpc_timeout,
-            max_retries,
-            retry_wait,
-        })
-    }
-
-    /// Get the current master endpoint.
-    fn current_master(&self) -> SocketAddr {
-        let index = self
-            .current_master_index
-            .load(std::sync::atomic::Ordering::Relaxed);
-        self.master_endpoints[index % self.master_endpoints.len()]
-    }
-
-    /// Switch to the next master endpoint.
-    fn switch_master(&self) {
-        self.current_master_index
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Send an RPC request to the master.
-    pub async fn send_rpc<Req, Resp>(
-        &self,
-        message_type: TransportMessageType,
-        request: &Req,
-    ) -> Result<Resp>
-    where
-        Req: ProstMessage,
-        Resp: ProstMessage + Default,
-    {
-        let mut last_error = None;
-
-        for attempt in 0..self.max_retries {
-            let master_addr = self.current_master();
-
-            match self
-                .send_rpc_to_addr(master_addr, message_type, request)
-                .await
-            {
-                Ok(response) => return Ok(response),
-                Err(e) => {
-                    warn!(
-                        "Failed to send RPC to master {} (attempt {}): {}",
-                        master_addr,
-                        attempt + 1,
-                        e
-                    );
-                    last_error = Some(e);
-                    self.switch_master();
-
-                    if attempt < self.max_retries - 1 {
-                        tokio::time::sleep(self.retry_wait).await;
-                    }
-                }
-            }
         }
-
-        Err(last_error.unwrap_or_else(|| {
-            CelebornError::Connection("All master endpoints failed".to_string())
-        }))
     }
 
-    /// Send an RPC request to a specific master address.
-    async fn send_rpc_to_addr<Req, Resp>(
+    /// Send an RPC request to a specific address with a given endpoint name.
+    pub async fn send_rpc_to_endpoint<Req, Resp>(
         &self,
         addr: SocketAddr,
+        endpoint_name: &str,
         message_type: TransportMessageType,
         request: &Req,
     ) -> Result<Resp>
@@ -150,9 +75,9 @@ impl MasterRpcClient {
         Req: ProstMessage,
         Resp: ProstMessage + Default,
     {
-        debug!("Connecting to master at {}", addr);
+        debug!("Connecting to {} at {}", endpoint_name, addr);
 
-        // Connect to master
+        // Connect to server
         let mut stream = timeout(self.rpc_timeout, TcpStream::connect(addr))
             .await
             .map_err(|_| CelebornError::Timeout(self.rpc_timeout.as_millis() as u64))?
@@ -164,14 +89,14 @@ impl MasterRpcClient {
             CelebornError::Serialization(format!("Failed to encode request: {}", e))
         })?;
 
-        // Create receiver address from master endpoint
+        // Create receiver address from endpoint
         let receiver_address = RpcAddress::new(addr.ip().to_string(), addr.port() as i32);
 
         // Encode the RequestMessage with Java serialization
         let request_message = encode_request_message(
             self.local_address.as_ref(),
             Some(&receiver_address),
-            "MasterEndpoint",
+            endpoint_name,
             message_type as i32,
             &payload,
         );
@@ -211,8 +136,9 @@ impl MasterRpcClient {
         frame.extend_from_slice(&request_message);
 
         debug!(
-            "Sending RPC request {} to master, frame size: {}",
+            "Sending RPC request {} to {}, frame size: {}",
             request_id,
+            endpoint_name,
             frame.len()
         );
 
@@ -314,7 +240,6 @@ impl MasterRpcClient {
         match msg_type {
             4 => {
                 // RPC_RESPONSE - body is Java serialized TransportMessage
-                debug!("Response body ({} bytes): {:02x?}", body.len(), &body[..std::cmp::min(100, body.len())]);
                 self.decode_java_response(&body)
             }
             5 => {
@@ -428,37 +353,86 @@ impl MasterRpcClient {
     }
 
     /// Extract the payload from a Java serialized TransportMessage.
+    ///
+    /// TransportMessage has two serializable fields:
+    /// - messageTypeValue (int) - primitive type, written directly
+    /// - payload (byte[]) - object type, written as TC_ARRAY
+    ///
+    /// Java serialization format for TransportMessage:
+    /// 1. Stream header: 0xAC 0xED 0x00 0x05
+    /// 2. TC_OBJECT (0x73)
+    /// 3. Class descriptor (TC_CLASSDESC 0x72 or TC_REFERENCE 0x71)
+    /// 4. Class data:
+    ///    - For primitive fields: raw bytes (int = 4 bytes)
+    ///    - For object fields: serialized objects
     fn extract_transport_message_payload(&self, data: &[u8]) -> Result<Vec<u8>> {
-        // This is a simplified parser for Java serialization.
-        // It looks for the byte array payload in the TransportMessage.
+        if data.len() < 10 {
+            return Err(CelebornError::Protocol(
+                "Data too short for TransportMessage".to_string(),
+            ));
+        }
+        
+        // Verify Java serialization header
+        if data[0] != 0xAC || data[1] != 0xED {
+            return Err(CelebornError::Protocol(format!(
+                "Invalid Java serialization magic: {:02X}{:02X}",
+                data[0], data[1]
+            )));
+        }
+        
+        // Parse TransportMessage structure:
+        // The class has two fields:
+        // 1. messageTypeValue (int) - primitive, written directly after class descriptor
+        // 2. payload (byte[]) - object, can be TC_NULL (0x70) or TC_ARRAY (0x75)
         //
-        // The structure is:
-        // - Stream header (4 bytes)
-        // - TC_OBJECT (1 byte)
-        // - Class descriptor for TransportMessage
-        // - Field values:
-        //   - messageTypeValue (int, 4 bytes)
-        //   - payload (byte array)
+        // We need to find where the class data starts (after TC_ENDBLOCKDATA + TC_NULL for superclass)
+        // Then read the int (4 bytes) and the payload object
         
-        // Skip stream header
-        let mut pos = 4;
+        // Find TC_ENDBLOCKDATA (0x78) followed by TC_NULL (0x70) which marks end of class descriptor
+        let mut pos = 4; // Skip stream header
         
-        // We need to parse through the Java serialization to find the byte array
-        // This is complex, so we'll use a heuristic approach:
-        // Look for TC_ARRAY (0x75) followed by byte array class descriptor
+        while pos < data.len().saturating_sub(6) {
+            if data[pos] == 0x78 && data[pos + 1] == 0x70 {
+                // Found end of class descriptor
+                pos += 2;
+                
+                // Read messageTypeValue (4 bytes int)
+                if pos + 4 > data.len() {
+                    break;
+                }
+                let _message_type = i32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+                pos += 4;
+                
+                // Read payload object
+                if pos >= data.len() {
+                    break;
+                }
+                
+                let payload_marker = data[pos];
+                
+                if payload_marker == 0x70 {
+                    // TC_NULL - payload is null, return empty array
+                    return Ok(Vec::new());
+                } else if payload_marker == 0x75 {
+                    // TC_ARRAY - parse the byte array
+                    if let Some((array_data, _)) = self.try_parse_byte_array(&data[pos..]) {
+                        return Ok(array_data);
+                    }
+                }
+                
+                // If we get here, try to continue searching
+            }
+            pos += 1;
+        }
         
-        while pos < data.len() - 10 {
-            // Look for TC_ARRAY marker
+        // Fallback: Search for TC_ARRAY markers
+        pos = 4;
+        
+        while pos < data.len().saturating_sub(5) {
             if data[pos] == 0x75 {
-                // Check if this is followed by a byte array class descriptor
-                // TC_CLASSDESC (0x72) + "[B" or TC_REFERENCE
-                if pos + 1 < data.len() {
-                    let next = data[pos + 1];
-                    if next == 0x72 || next == 0x71 {
-                        // Try to parse as byte array
-                        if let Some((array_data, _)) = self.try_parse_byte_array(&data[pos..]) {
-                            return Ok(array_data);
-                        }
+                if let Some((array_data, _)) = self.try_parse_byte_array(&data[pos..]) {
+                    if !array_data.is_empty() {
+                        return Ok(array_data);
                     }
                 }
             }
@@ -471,8 +445,16 @@ impl MasterRpcClient {
     }
 
     /// Try to parse a byte array from Java serialization data.
+    ///
+    /// Format:
+    /// - TC_ARRAY (0x75)
+    /// - Class descriptor:
+    ///   - TC_CLASSDESC (0x72): className length (2) + className + serialVersionUID (8) + flags (1) + field count (2) + TC_ENDBLOCKDATA (0x78) + superclass
+    ///   - TC_REFERENCE (0x71): handle (4 bytes)
+    /// - Array length (4 bytes)
+    /// - Array data
     fn try_parse_byte_array(&self, data: &[u8]) -> Option<(Vec<u8>, usize)> {
-        if data.len() < 10 {
+        if data.len() < 6 {
             return None;
         }
 
@@ -484,6 +466,10 @@ impl MasterRpcClient {
         let mut pos = 1;
 
         // Skip class descriptor (either TC_CLASSDESC or TC_REFERENCE)
+        if pos >= data.len() {
+            return None;
+        }
+        
         if data[pos] == 0x72 {
             // TC_CLASSDESC - need to skip the full descriptor
             pos += 1;
@@ -493,25 +479,56 @@ impl MasterRpcClient {
                 return None;
             }
             let name_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
-            pos += 2 + name_len;
+            pos += 2;
+            
+            // Skip class name (should be "[B" for byte array)
+            pos += name_len;
             
             // Serial version UID (8 bytes)
+            if pos + 8 > data.len() {
+                return None;
+            }
             pos += 8;
             
-            // Skip to end of class descriptor
-            // This is simplified - in reality we'd need to parse the full descriptor
-            while pos < data.len() && data[pos] != 0x78 {
-                pos += 1;
+            // Flags (1 byte)
+            if pos >= data.len() {
+                return None;
             }
-            if pos < data.len() {
-                pos += 1; // Skip TC_ENDBLOCKDATA
+            pos += 1;
+            
+            // Field count (2 bytes) - for arrays this should be 0
+            if pos + 2 > data.len() {
+                return None;
             }
-            // Skip super class (TC_NULL)
-            if pos < data.len() && data[pos] == 0x70 {
-                pos += 1;
+            pos += 2;
+            
+            // TC_ENDBLOCKDATA (0x78)
+            if pos >= data.len() || data[pos] != 0x78 {
+                // Try to find TC_ENDBLOCKDATA
+                while pos < data.len() && data[pos] != 0x78 {
+                    pos += 1;
+                }
+                if pos >= data.len() {
+                    return None;
+                }
+            }
+            pos += 1; // Skip TC_ENDBLOCKDATA
+            
+            // Super class descriptor (TC_NULL = 0x70 for arrays)
+            if pos >= data.len() {
+                return None;
+            }
+            if data[pos] == 0x70 {
+                pos += 1; // TC_NULL
+            } else if data[pos] == 0x71 {
+                // TC_REFERENCE - skip 4 bytes handle
+                pos += 5;
             }
         } else if data[pos] == 0x71 {
             // TC_REFERENCE - 4 bytes handle
+            if pos + 5 > data.len() {
+                return None;
+            }
             pos += 5;
         } else {
             return None;
@@ -521,8 +538,17 @@ impl MasterRpcClient {
         if pos + 4 > data.len() {
             return None;
         }
-        let array_len = i32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let array_len = i32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+        if array_len < 0 {
+            return None;
+        }
+        let array_len = array_len as usize;
         pos += 4;
+
+        // Sanity check array length
+        if array_len > 10 * 1024 * 1024 {
+            return None;
+        }
 
         // Array data
         if pos + array_len > data.len() {
@@ -565,6 +591,108 @@ impl MasterRpcClient {
     }
 }
 
+/// Master RPC client for communicating with Celeborn Master.
+/// This is a convenience wrapper around NettyRpcClient with retry logic.
+pub struct MasterRpcClient {
+    /// Master endpoints
+    master_endpoints: Vec<SocketAddr>,
+    /// Current master index
+    current_master_index: std::sync::atomic::AtomicUsize,
+    /// Underlying Netty RPC client
+    netty_client: NettyRpcClient,
+    /// Max retries
+    max_retries: usize,
+    /// Retry wait duration
+    retry_wait: Duration,
+}
+
+impl MasterRpcClient {
+    /// Create a new Master RPC client.
+    pub fn new(
+        master_endpoints: Vec<SocketAddr>,
+        local_address: Option<RpcAddress>,
+        rpc_timeout: Duration,
+        max_retries: usize,
+        retry_wait: Duration,
+    ) -> Result<Self> {
+        if master_endpoints.is_empty() {
+            return Err(CelebornError::Config(
+                "No master endpoints provided".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            master_endpoints,
+            current_master_index: std::sync::atomic::AtomicUsize::new(0),
+            netty_client: NettyRpcClient::new(local_address, rpc_timeout),
+            max_retries,
+            retry_wait,
+        })
+    }
+
+    /// Get the current master endpoint.
+    fn current_master(&self) -> SocketAddr {
+        let index = self
+            .current_master_index
+            .load(std::sync::atomic::Ordering::Relaxed);
+        self.master_endpoints[index % self.master_endpoints.len()]
+    }
+
+    /// Switch to the next master endpoint.
+    fn switch_master(&self) {
+        self.current_master_index
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Send an RPC request to the master with retry logic.
+    pub async fn send_rpc<Req, Resp>(
+        &self,
+        message_type: TransportMessageType,
+        request: &Req,
+    ) -> Result<Resp>
+    where
+        Req: ProstMessage,
+        Resp: ProstMessage + Default,
+    {
+        let mut last_error = None;
+
+        for attempt in 0..self.max_retries {
+            let master_addr = self.current_master();
+
+            match self
+                .netty_client
+                .send_rpc_to_endpoint(master_addr, "MasterEndpoint", message_type, request)
+                .await
+            {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    warn!(
+                        "Failed to send RPC to master {} (attempt {}): {}",
+                        master_addr,
+                        attempt + 1,
+                        e
+                    );
+                    last_error = Some(e);
+                    self.switch_master();
+
+                    if attempt < self.max_retries - 1 {
+                        tokio::time::sleep(self.retry_wait).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            CelebornError::Connection("All master endpoints failed".to_string())
+        }))
+    }
+
+    /// Get the underlying Netty RPC client for direct use.
+    pub fn netty_client(&self) -> &NettyRpcClient {
+        &self.netty_client
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,5 +727,14 @@ mod tests {
             Duration::from_millis(100),
         );
         assert!(client.is_err());
+    }
+
+    #[test]
+    fn test_netty_rpc_client_creation() {
+        let client = NettyRpcClient::new(
+            Some(RpcAddress::new("localhost", 12345)),
+            Duration::from_secs(30),
+        );
+        assert!(client.rpc_timeout == Duration::from_secs(30));
     }
 }

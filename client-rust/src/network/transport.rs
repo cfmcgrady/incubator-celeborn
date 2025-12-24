@@ -18,27 +18,25 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use prost::Message as ProstMessage;
-use tracing::error;
 
 use crate::config::CelebornConfig;
-use crate::error::{CelebornError, Result, StatusCode};
-use crate::network::connection::ConnectionPool;
-use crate::network::codec::Frame;
-use crate::network::master_rpc::MasterRpcClient;
+use crate::error::{CelebornError, Result};
+use crate::network::master_rpc::{MasterRpcClient, NettyRpcClient};
 use crate::protocol::java_serialization::RpcAddress;
-use crate::protocol::message::MessageType;
 use crate::protocol::transport::*;
 
 /// Transport client for communicating with Celeborn servers.
+///
+/// Both Master and Worker use NettyRpcEnv which requires Java serialization for RPC messages.
+/// This client uses the appropriate serialization format for all communications.
 pub struct TransportClient {
     /// Configuration
     config: Arc<CelebornConfig>,
-    /// Connection pool (for worker communication)
-    connection_pool: ConnectionPool,
-    /// Master RPC client (uses Java serialization)
+    /// Master RPC client (uses Java serialization with retry logic)
     master_rpc_client: MasterRpcClient,
+    /// Netty RPC client for Worker communication (uses Java serialization)
+    netty_rpc_client: NettyRpcClient,
 }
 
 impl TransportClient {
@@ -60,11 +58,6 @@ impl TransportClient {
             ));
         }
 
-        let connection_pool = ConnectionPool::new(
-            config.connection_pool_size,
-            config.max_in_flight_requests,
-        );
-
         // Create Master RPC client with Java serialization support
         let master_rpc_client = MasterRpcClient::new(
             master_endpoints,
@@ -74,10 +67,16 @@ impl TransportClient {
             config.retry_wait,
         )?;
 
+        // Create Netty RPC client for Worker communication
+        let netty_rpc_client = NettyRpcClient::new(
+            Some(RpcAddress::new("localhost", 0)),
+            config.rpc_timeout,
+        );
+
         Ok(Self {
             config,
-            connection_pool,
             master_rpc_client,
+            netty_rpc_client,
         })
     }
 
@@ -95,37 +94,8 @@ impl TransportClient {
         self.master_rpc_client.send_rpc(message_type, request).await
     }
 
-    /// Send an RPC request to a specific address (for worker communication).
-    /// Uses the simpler protobuf-based format.
-    pub async fn send_rpc<Req, Resp>(
-        &self,
-        addr: SocketAddr,
-        message_type: TransportMessageType,
-        request: &Req,
-    ) -> Result<Resp>
-    where
-        Req: ProstMessage,
-        Resp: ProstMessage + Default,
-    {
-        let conn = self.connection_pool.get_connection(addr).await?;
-
-        // Encode the request
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&(message_type as i32).to_be_bytes());
-        request.encode(&mut payload).map_err(|e| {
-            CelebornError::Serialization(format!("Failed to encode request: {}", e))
-        })?;
-
-        // Send RPC
-        let response_frame = conn
-            .send_rpc(Bytes::from(payload), self.config.rpc_timeout)
-            .await?;
-
-        // Decode response
-        self.decode_response(response_frame)
-    }
-
     /// Send an RPC request to a worker.
+    /// Uses Java serialization format required by Celeborn Worker (NettyRpcEnv).
     pub async fn send_to_worker<Req, Resp>(
         &self,
         host: &str,
@@ -144,70 +114,15 @@ impl TransportClient {
             .next()
             .ok_or_else(|| CelebornError::Connection(format!("Cannot resolve {}", addr_str)))?;
 
-        self.send_rpc(addr, message_type, request).await
-    }
-
-    /// Decode an RPC response.
-    fn decode_response<Resp>(&self, frame: Frame) -> Result<Resp>
-    where
-        Resp: ProstMessage + Default,
-    {
-        match frame.message_type {
-            MessageType::RpcResponse => {
-                // In the new frame format:
-                // - frame.message contains: request_id (8 bytes) + body_size (4 bytes)
-                // - frame.body contains: the actual protobuf response
-                
-                // The body contains: message_type (4 bytes) + protobuf data
-                if frame.body.len() < 4 {
-                    return Err(CelebornError::Protocol(
-                        "Response body too short".to_string(),
-                    ));
-                }
-                
-                // Skip message type (4 bytes) in the body
-                let response_body = &frame.body[4..];
-                
-                Resp::decode(response_body).map_err(|e| {
-                    CelebornError::Serialization(format!("Failed to decode response: {}", e))
-                })
-            }
-            MessageType::RpcFailure => {
-                // For RPC failure, the error message is in the message content
-                // Format: request_id (8 bytes) + error_string_length (4 bytes) + error_string
-                if frame.message.len() < 12 {
-                    return Err(CelebornError::Protocol(
-                        "RPC failure response too short".to_string(),
-                    ));
-                }
-                
-                // Skip request ID (8 bytes), read error string length (4 bytes)
-                let error_len = i32::from_be_bytes([
-                    frame.message[8], frame.message[9],
-                    frame.message[10], frame.message[11]
-                ]) as usize;
-                
-                let error_msg = if frame.message.len() >= 12 + error_len {
-                    String::from_utf8_lossy(&frame.message[12..12 + error_len]).to_string()
-                } else {
-                    "Unknown error".to_string()
-                };
-                
-                Err(CelebornError::ServerError {
-                    status: StatusCode::RpcFailed,
-                    message: error_msg,
-                })
-            }
-            _ => Err(CelebornError::Protocol(format!(
-                "Unexpected response type: {:?}",
-                frame.message_type
-            ))),
-        }
+        // Worker uses "WorkerEndpoint" as the endpoint name
+        self.netty_rpc_client
+            .send_rpc_to_endpoint(addr, "WorkerEndpoint", message_type, request)
+            .await
     }
 
     /// Close all connections.
     pub fn close(&self) {
-        self.connection_pool.close_all();
+        // NettyRpcClient creates new connections per request, so nothing to close
     }
 }
 
