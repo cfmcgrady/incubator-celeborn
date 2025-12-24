@@ -20,7 +20,9 @@
 
 pub mod codec;
 pub mod connection;
+pub mod master_rpc;
 pub mod transport;
 
 pub use connection::{Connection, ConnectionPool};
+pub use master_rpc::MasterRpcClient;
 pub use transport::{TransportClient, TransportClientFactory};
