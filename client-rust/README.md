@@ -174,6 +174,7 @@ These examples require a running Celeborn cluster:
 
 - **`basic_usage.rs`** - Complete shuffle workflow (register, push, fetch, cleanup). Requires a Celeborn Master.
 - **`worker_connection.rs`** - Direct connection to a Worker's fetch port. Requires a Celeborn Worker.
+- **`revive_integration_test.rs`** - Comprehensive revive mechanism test with 11 test scenarios.
 
 ```bash
 # Connect to a Celeborn Master (default: 127.0.0.1:9097)
@@ -181,9 +182,47 @@ CELEBORN_MASTER=<master-host>:9097 cargo run --example basic_usage
 
 # Connect to a Celeborn Worker's fetch port
 WORKER_HOST=<worker-host> WORKER_FETCH_PORT=<port> cargo run --example worker_connection
+
+# Run revive integration test example
+cargo run --example revive_integration_test -- <master-host>:9097
 ```
 
 > **Note**: The `basic_usage` example requires Master RPC communication, which uses Java serialization format (NettyRpcEnv). This is currently a work-in-progress. The `worker_connection` example works with the TransportClient protocol and can successfully communicate with Worker fetch/push/replicate ports.
+
+## Integration Tests
+
+The `tests/` directory contains integration tests that validate the revive mechanism:
+
+### Running Integration Tests
+
+Integration tests require a running Celeborn cluster. They are marked with `#[ignore]` by default to avoid failures in CI environments without a cluster.
+
+```bash
+# Run all integration tests (requires running Celeborn cluster)
+CELEBORN_MASTER=<master-host>:9097 cargo test --test revive_integration_test -- --ignored --nocapture
+
+# Run a specific integration test
+CELEBORN_MASTER=<master-host>:9097 cargo test --test revive_integration_test test_single_partition_revive -- --ignored --nocapture
+
+# Run unit tests only (no cluster required)
+cargo test --test revive_integration_test
+```
+
+### Available Integration Tests
+
+| Test | Description |
+|------|-------------|
+| `test_shuffle_registration_with_locations` | Verifies shuffle registration returns valid partition locations |
+| `test_single_partition_revive` | Tests single partition revive mechanism |
+| `test_push_data_with_revive_manager` | Validates push data with revive manager attached |
+| `test_push_after_revive` | Tests push data after simulated revive scenario |
+| `test_batch_revive_requests` | Verifies batch revive request handling |
+| `test_worker_exclusion` | Tests worker exclusion logic |
+| `test_mapper_end_and_commit_with_revive` | Validates mapper end and commit flow with revive |
+| `test_end_to_end_data_integrity` | End-to-end data integrity test with revive |
+| `test_revive_with_different_status_codes` | Tests revive with various status codes |
+| `test_multiple_shuffles_with_revive` | Validates multiple shuffles with revive |
+| `test_revive_request_status` | Unit test for ReviveRequest status management |
 
 ## Protocol Compatibility
 
