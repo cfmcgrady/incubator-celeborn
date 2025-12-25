@@ -128,6 +128,10 @@ pub struct WorkerPartitionReader {
     stream_id: i64,
     /// Total number of chunks
     num_chunks: i32,
+    /// Start chunk index (for skew partition support)
+    start_chunk_index: i32,
+    /// End chunk index (for skew partition support)
+    end_chunk_index: i32,
     /// Index of the next chunk to return to caller
     return_chunk_index: AtomicI32,
     /// Index of the next chunk to fetch
@@ -154,6 +158,41 @@ impl WorkerPartitionReader {
         start_map_index: i32,
         end_map_index: i32,
     ) -> Result<Self> {
+        Self::with_chunk_range(
+            config,
+            connection_pool,
+            shuffle_key,
+            location,
+            start_map_index,
+            end_map_index,
+            -1,
+            -1,
+        )
+        .await
+    }
+
+    /// Create a new WorkerPartitionReader with chunk range support for skew partitions.
+    ///
+    /// # Arguments
+    /// * `config` - Reader configuration
+    /// * `connection_pool` - Connection pool for network operations
+    /// * `shuffle_key` - Shuffle key
+    /// * `location` - Partition location
+    /// * `start_map_index` - Start map index for filtering
+    /// * `end_map_index` - End map index for filtering
+    /// * `start_chunk_index` - Start chunk index (for skew partition, -1 means from beginning)
+    /// * `end_chunk_index` - End chunk index (for skew partition, -1 means to end)
+    #[allow(clippy::too_many_arguments)]
+    pub async fn with_chunk_range(
+        config: WorkerPartitionReaderConfig,
+        connection_pool: &ConnectionPool,
+        shuffle_key: String,
+        location: PartitionLocation,
+        start_map_index: i32,
+        end_map_index: i32,
+        start_chunk_index: i32,
+        end_chunk_index: i32,
+    ) -> Result<Self> {
         let addr: SocketAddr = location
             .fetch_address()
             .parse()
@@ -176,9 +215,11 @@ impl WorkerPartitionReader {
             encode_transport_message(PbMessageType::OpenStream as i32, &open_stream);
 
         debug!(
-            "Opening stream for partition {} to {}",
+            "Opening stream for partition {} to {} (chunk range: {}..{})",
             location.unique_id(),
-            addr
+            addr,
+            start_chunk_index,
+            end_chunk_index
         );
 
         let response = connection
@@ -202,9 +243,28 @@ impl WorkerPartitionReader {
         let stream_handler = PbStreamHandler::decode(pb_payload)
             .map_err(|e| CelebornError::Protocol(format!("Failed to decode PbStreamHandler: {}", e)))?;
 
+        // Calculate effective chunk range
+        let effective_start = if start_chunk_index >= 0 {
+            start_chunk_index
+        } else {
+            0
+        };
+        let effective_end = if end_chunk_index >= 0 {
+            std::cmp::min(end_chunk_index, stream_handler.num_chunks)
+        } else {
+            stream_handler.num_chunks
+        };
+
+        let effective_num_chunks = std::cmp::max(0, effective_end - effective_start);
+
         debug!(
-            "Opened stream {} with {} chunks for partition {}",
-            stream_handler.stream_id, stream_handler.num_chunks, location.unique_id()
+            "Opened stream {} with {} chunks (effective: {} from {}..{}) for partition {}",
+            stream_handler.stream_id,
+            stream_handler.num_chunks,
+            effective_num_chunks,
+            effective_start,
+            effective_end,
+            location.unique_id()
         );
 
         let reader = Self {
@@ -213,9 +273,11 @@ impl WorkerPartitionReader {
             shuffle_key,
             connection,
             stream_id: stream_handler.stream_id,
-            num_chunks: stream_handler.num_chunks,
+            num_chunks: effective_num_chunks,
+            start_chunk_index: effective_start,
+            end_chunk_index: effective_end,
             return_chunk_index: AtomicI32::new(0),
-            fetch_chunk_index: AtomicI32::new(0),
+            fetch_chunk_index: AtomicI32::new(effective_start),
             in_flight_requests: AtomicUsize::new(0),
             chunk_queue: Mutex::new(VecDeque::new()),
             closed: AtomicBool::new(false),
@@ -252,8 +314,8 @@ impl WorkerPartitionReader {
             let fetch_index = self.fetch_chunk_index.load(Ordering::Acquire);
             let in_flight = self.in_flight_requests.load(Ordering::Acquire);
 
-            // Check if we should fetch more
-            if fetch_index >= self.num_chunks {
+            // Check if we should fetch more (use end_chunk_index for range support)
+            if fetch_index >= self.end_chunk_index {
                 break;
             }
             if in_flight >= self.config.fetch_max_reqs_in_flight {
@@ -449,14 +511,29 @@ impl WorkerPartitionReader {
         self.stream_id
     }
 
-    /// Get the total number of chunks.
+    /// Get the total number of chunks (effective, considering chunk range).
     pub fn num_chunks(&self) -> i32 {
         self.num_chunks
+    }
+
+    /// Get the start chunk index.
+    pub fn start_chunk_index(&self) -> i32 {
+        self.start_chunk_index
+    }
+
+    /// Get the end chunk index.
+    pub fn end_chunk_index(&self) -> i32 {
+        self.end_chunk_index
     }
 
     /// Get the number of chunks already returned.
     pub fn chunks_returned(&self) -> i32 {
         self.return_chunk_index.load(Ordering::Acquire)
+    }
+
+    /// Get the number of chunks remaining to be read.
+    pub fn chunks_remaining(&self) -> i32 {
+        self.num_chunks - self.return_chunk_index.load(Ordering::Acquire)
     }
 }
 
@@ -494,7 +571,10 @@ impl PartitionReader for WorkerPartitionReader {
         // Trigger more fetches
         self.trigger_fetch().await;
 
-        // Wait for chunk to be available
+        // Wait for chunk to be available with timeout protection
+        let mut wait_iterations = 0;
+        const MAX_WAIT_ITERATIONS: usize = 100000;
+
         loop {
             {
                 let mut queue = self.chunk_queue.lock().await;
@@ -515,9 +595,16 @@ impl PartitionReader for WorkerPartitionReader {
 
             // If no chunk available and we've fetched all, we're done
             let fetch_index = self.fetch_chunk_index.load(Ordering::Acquire);
-            if fetch_index >= self.num_chunks
+            if fetch_index >= self.end_chunk_index
                 && self.in_flight_requests.load(Ordering::Acquire) == 0
             {
+                return Ok(None);
+            }
+
+            // Safety check to prevent infinite loops
+            wait_iterations += 1;
+            if wait_iterations > MAX_WAIT_ITERATIONS {
+                warn!("next() exceeded maximum wait iterations, returning None");
                 return Ok(None);
             }
 

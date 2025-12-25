@@ -111,6 +111,14 @@ pub enum CelebornError {
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// Decompression failed
+    #[error("Decompression failed: {0}")]
+    DecompressionFailed(String),
+
+    /// Invalid configuration
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
 }
 
 /// Status codes returned by Celeborn server.

@@ -22,6 +22,7 @@ pub mod fetch;
 pub mod revive;
 pub mod partition_split;
 pub mod partition_reader;
+pub mod input_stream;
 
 pub use lifecycle::LifecycleManager;
 pub use shuffle::ShuffleClient;
@@ -33,6 +34,11 @@ pub use partition_split::{
 pub use partition_reader::{
     PartitionReader, WorkerPartitionReader, WorkerPartitionReaderBuilder,
     WorkerPartitionReaderConfig
+};
+pub use input_stream::{
+    CelebornInputStream, CelebornInputStreamBuilder, CelebornInputStreamConfig,
+    MetricsCallback, NoOpMetricsCallback, AsyncCelebornInputStream,
+    PushFailedBatch, ChunkRange, CelebornAsyncReader
 };
 
 use std::sync::Arc;

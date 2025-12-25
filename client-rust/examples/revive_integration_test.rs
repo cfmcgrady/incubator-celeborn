@@ -401,7 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Signal mapper end for both mappers
     for map_id in 0..num_mappers {
         match lifecycle_manager.mapper_end(shuffle_id, map_id, 0, num_partitions).await {
-            Ok(()) => println!("  ✓ Mapper {} ended successfully", map_id),
+            Ok(_) => println!("  ✓ Mapper {} ended successfully", map_id),
             Err(e) => println!("  ⚠ Mapper {} end warning: {}", map_id, e),
         }
     }
