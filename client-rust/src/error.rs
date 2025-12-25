@@ -89,6 +89,25 @@ pub enum CelebornError {
     #[error("Quota exceeded: {0}")]
     QuotaExceeded(String),
 
+    /// Revive failed
+    #[error("Revive failed for shuffle {shuffle_id} partition {partition_id}: {status:?}")]
+    ReviveFailed {
+        shuffle_id: i32,
+        partition_id: i32,
+        status: StatusCode,
+    },
+
+    /// Stage ended
+    #[error("Stage ended for shuffle {0}")]
+    StageEnded(i32),
+
+    /// Max retries exceeded
+    #[error("Max retries ({max_retries}) exceeded: {message}")]
+    MaxRetriesExceeded {
+        max_retries: u32,
+        message: String,
+    },
+
     /// Internal error
     #[error("Internal error: {0}")]
     Internal(String),
@@ -133,6 +152,17 @@ pub enum StatusCode {
     FetchDataTimeout = 32,
     RequestFailed = 33,
     RpcFailed = 34,
+    // Additional status codes for push failures
+    PushDataFailPrimary = 35,
+    PushDataFailReplica = 36,
+    PushDataCreateConnectionFailPrimary = 37,
+    PushDataCreateConnectionFailReplica = 38,
+    PushDataConnectionExceptionPrimary = 39,
+    PushDataConnectionExceptionReplica = 40,
+    PushDataTimeoutPrimary = 41,
+    PushDataTimeoutReplica = 42,
+    PushDataSuccessPrimaryCongested = 43,
+    PushDataSuccessReplicaCongested = 44,
     Unknown = -1,
 }
 
@@ -174,6 +204,16 @@ impl From<i32> for StatusCode {
             32 => StatusCode::FetchDataTimeout,
             33 => StatusCode::RequestFailed,
             34 => StatusCode::RpcFailed,
+            35 => StatusCode::PushDataFailPrimary,
+            36 => StatusCode::PushDataFailReplica,
+            37 => StatusCode::PushDataCreateConnectionFailPrimary,
+            38 => StatusCode::PushDataCreateConnectionFailReplica,
+            39 => StatusCode::PushDataConnectionExceptionPrimary,
+            40 => StatusCode::PushDataConnectionExceptionReplica,
+            41 => StatusCode::PushDataTimeoutPrimary,
+            42 => StatusCode::PushDataTimeoutReplica,
+            43 => StatusCode::PushDataSuccessPrimaryCongested,
+            44 => StatusCode::PushDataSuccessReplicaCongested,
             _ => StatusCode::Unknown,
         }
     }

@@ -19,9 +19,11 @@ pub mod lifecycle;
 pub mod shuffle;
 pub mod push;
 pub mod fetch;
+pub mod revive;
 
 pub use lifecycle::LifecycleManager;
 pub use shuffle::ShuffleClient;
+pub use revive::{ReviveManager, ReviveRequest, ReviveResult};
 
 use std::sync::Arc;
 
