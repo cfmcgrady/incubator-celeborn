@@ -34,6 +34,65 @@ use crate::network::TransportClient;
 use crate::protocol::transport::*;
 use crate::protocol::{PartitionLocation, PartitionMode, StorageInfo, WorkerInfo};
 
+/// Stage end status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageEndStatus {
+    /// Stage has not ended yet
+    NotEnded,
+    /// Stage end is in progress
+    InProgress,
+    /// Stage ended successfully
+    Success,
+    /// Stage ended with data loss
+    DataLost,
+}
+
+/// Mapper attempt state.
+#[derive(Debug)]
+struct MapperAttemptState {
+    /// Mapper attempts (map_id -> attempt_id)
+    /// -1 means not finished, >= 0 means finished with that attempt
+    attempts: Vec<AtomicI32>,
+}
+
+impl MapperAttemptState {
+    fn new(num_mappers: i32) -> Self {
+        let attempts: Vec<AtomicI32> = (0..num_mappers)
+            .map(|_| AtomicI32::new(-1))
+            .collect();
+        Self { attempts }
+    }
+
+    /// Mark a mapper attempt as finished.
+    /// Returns true if this is the first successful attempt for this mapper.
+    fn finish_attempt(&self, map_id: i32, attempt_id: i32) -> bool {
+        if map_id < 0 || map_id as usize >= self.attempts.len() {
+            return false;
+        }
+        
+        let current = self.attempts[map_id as usize].load(Ordering::Acquire);
+        if current >= 0 {
+            // Already finished with another attempt
+            return false;
+        }
+        
+        // Try to set the attempt
+        self.attempts[map_id as usize]
+            .compare_exchange(current, attempt_id, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    /// Check if all mappers have finished.
+    fn all_finished(&self) -> bool {
+        self.attempts.iter().all(|a| a.load(Ordering::Acquire) >= 0)
+    }
+
+    /// Get the number of finished mappers.
+    fn finished_count(&self) -> usize {
+        self.attempts.iter().filter(|a| a.load(Ordering::Acquire) >= 0).count()
+    }
+}
+
 /// Shuffle state information.
 #[derive(Debug)]
 struct ShuffleState {
@@ -49,6 +108,10 @@ struct ShuffleState {
     committed_ids: DashSet<String>,
     /// Batch ID counters per partition (partition_id -> counter)
     batch_id_counters: DashMap<i32, AtomicI32>,
+    /// Stage end status
+    stage_end_status: RwLock<StageEndStatus>,
+    /// Mapper attempt state
+    mapper_attempts: MapperAttemptState,
 }
 
 impl ShuffleState {
@@ -60,6 +123,8 @@ impl ShuffleState {
             registered: AtomicBool::new(false),
             committed_ids: DashSet::new(),
             batch_id_counters: DashMap::new(),
+            stage_end_status: RwLock::new(StageEndStatus::NotEnded),
+            mapper_attempts: MapperAttemptState::new(num_mappers),
         }
     }
 }
@@ -383,30 +448,224 @@ impl LifecycleManager {
 
     /// Signal that a mapper has finished.
     ///
-    /// Note: In Celeborn, MapperEnd is handled by LifecycleManager (client-side component).
-    /// For the Rust client, we track mapper completion locally. The actual commit happens
-    /// when all mappers are done and we call get_reducer_file_group.
+    /// This tracks mapper completion and can trigger stage end when all mappers are done.
+    /// Returns true if this is the first successful attempt for this mapper.
     pub async fn mapper_end(
         &self,
         shuffle_id: i32,
         map_id: i32,
         attempt_id: i32,
-        _num_mappers: i32,
-    ) -> Result<()> {
+        num_mappers: i32,
+    ) -> Result<bool> {
         debug!(
             "Mapper end: shuffle={}, map={}, attempt={}",
             shuffle_id, map_id, attempt_id
         );
 
-        // In the Rust client, we handle mapper completion locally.
-        // The actual data commit to workers happens during push_data.
-        // When all mappers are done, the reducer can fetch data.
-        
-        // For now, we just log the completion. In a full implementation,
-        // we would track mapper completion and trigger commit when all mappers are done.
-        info!("Mapper {} (attempt {}) completed for shuffle {}", map_id, attempt_id, shuffle_id);
+        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+            CelebornError::ShuffleNotFound(shuffle_id)
+        })?;
 
-        Ok(())
+        // Mark this mapper attempt as finished
+        let is_first = state.mapper_attempts.finish_attempt(map_id, attempt_id);
+        
+        if is_first {
+            let finished = state.mapper_attempts.finished_count();
+            info!(
+                "Mapper {} (attempt {}) completed for shuffle {} ({}/{} mappers done)",
+                map_id, attempt_id, shuffle_id, finished, num_mappers
+            );
+        } else {
+            debug!(
+                "Mapper {} (attempt {}) already completed by another attempt for shuffle {}",
+                map_id, attempt_id, shuffle_id
+            );
+        }
+
+        Ok(is_first)
+    }
+
+    /// Handle stage end for a shuffle.
+    ///
+    /// This commits all files and marks the stage as ended.
+    /// Should be called after all mappers have finished.
+    pub async fn stage_end(&self, shuffle_id: i32) -> Result<StageEndStatus> {
+        info!("Handling stage end for shuffle {}", shuffle_id);
+
+        // Check if shuffle is registered
+        if !self.shuffles.contains_key(&shuffle_id) {
+            info!(
+                "[stage_end] Shuffle {} not registered, maybe no shuffle data within this stage",
+                shuffle_id
+            );
+            return Ok(StageEndStatus::Success);
+        }
+
+        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+            CelebornError::ShuffleNotFound(shuffle_id)
+        })?;
+
+        // Check current status
+        {
+            let status = state.stage_end_status.read().await;
+            match *status {
+                StageEndStatus::Success | StageEndStatus::DataLost => {
+                    info!("[stage_end] Shuffle {} already ended with status {:?}", shuffle_id, *status);
+                    return Ok(*status);
+                }
+                StageEndStatus::InProgress => {
+                    info!("[stage_end] Shuffle {} stage end is already in progress", shuffle_id);
+                    return Ok(StageEndStatus::InProgress);
+                }
+                StageEndStatus::NotEnded => {
+                    // Continue to process
+                }
+            }
+        }
+
+        // Set status to InProgress
+        {
+            let mut status = state.stage_end_status.write().await;
+            if *status != StageEndStatus::NotEnded {
+                return Ok(*status);
+            }
+            *status = StageEndStatus::InProgress;
+        }
+
+        // Drop the state reference before calling commit
+        drop(state);
+
+        // Commit files
+        let commit_result = self.request_commit_files(shuffle_id).await;
+
+        // Get state again to update status
+        let state = self.shuffles.get(&shuffle_id).ok_or_else(|| {
+            CelebornError::ShuffleNotFound(shuffle_id)
+        })?;
+
+        let final_status = match commit_result {
+            Ok(response) => {
+                let status_code = StatusCode::from(response.status);
+                if status_code.is_success() || status_code == StatusCode::PartialSuccess {
+                    // Check if there's data loss
+                    if !response.failed_primary_ids.is_empty() || !response.failed_replica_ids.is_empty() {
+                        warn!(
+                            "[stage_end] Shuffle {} completed with some failures: {} primary, {} replica failed",
+                            shuffle_id,
+                            response.failed_primary_ids.len(),
+                            response.failed_replica_ids.len()
+                        );
+                        StageEndStatus::DataLost
+                    } else {
+                        info!(
+                            "[stage_end] Shuffle {} completed successfully: {} primary, {} replica committed",
+                            shuffle_id,
+                            response.committed_primary_ids.len(),
+                            response.committed_replica_ids.len()
+                        );
+                        StageEndStatus::Success
+                    }
+                } else {
+                    warn!("[stage_end] Shuffle {} commit failed with status {:?}", shuffle_id, status_code);
+                    StageEndStatus::DataLost
+                }
+            }
+            Err(e) => {
+                warn!("[stage_end] Shuffle {} commit error: {}", shuffle_id, e);
+                StageEndStatus::DataLost
+            }
+        };
+
+        // Update final status
+        {
+            let mut status = state.stage_end_status.write().await;
+            *status = final_status;
+        }
+
+        // Clear partition locations (similar to Java implementation)
+        state.partition_locations.clear();
+
+        Ok(final_status)
+    }
+
+    /// Wait for stage end to complete.
+    ///
+    /// Returns (is_timeout, wait_time_ms).
+    pub async fn wait_stage_end(&self, shuffle_id: i32, timeout_ms: u64) -> (bool, u64) {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        let poll_interval = std::time::Duration::from_millis(100);
+
+        loop {
+            if let Some(state) = self.shuffles.get(&shuffle_id) {
+                let status = state.stage_end_status.read().await;
+                match *status {
+                    StageEndStatus::Success | StageEndStatus::DataLost => {
+                        let elapsed = start.elapsed().as_millis() as u64;
+                        return (false, elapsed);
+                    }
+                    _ => {}
+                }
+            } else {
+                // Shuffle not found, consider it ended
+                let elapsed = start.elapsed().as_millis() as u64;
+                return (false, elapsed);
+            }
+
+            if start.elapsed() >= timeout {
+                let elapsed = start.elapsed().as_millis() as u64;
+                return (true, elapsed);
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    /// Check if stage has ended.
+    pub async fn is_stage_end(&self, shuffle_id: i32) -> bool {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            let status = state.stage_end_status.read().await;
+            matches!(*status, StageEndStatus::Success | StageEndStatus::DataLost)
+        } else {
+            true // If shuffle not found, consider it ended
+        }
+    }
+
+    /// Check if stage end is in progress or completed.
+    pub async fn is_stage_end_or_in_progress(&self, shuffle_id: i32) -> bool {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            let status = state.stage_end_status.read().await;
+            !matches!(*status, StageEndStatus::NotEnded)
+        } else {
+            true
+        }
+    }
+
+    /// Get the stage end status.
+    pub async fn get_stage_end_status(&self, shuffle_id: i32) -> StageEndStatus {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            *state.stage_end_status.read().await
+        } else {
+            StageEndStatus::Success // If shuffle not found, consider it ended successfully
+        }
+    }
+
+    /// Check if all mappers have finished for a shuffle.
+    pub fn all_mappers_finished(&self, shuffle_id: i32) -> bool {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            state.mapper_attempts.all_finished()
+        } else {
+            false
+        }
+    }
+
+    /// Get the number of finished mappers for a shuffle.
+    pub fn finished_mapper_count(&self, shuffle_id: i32) -> usize {
+        if let Some(state) = self.shuffles.get(&shuffle_id) {
+            state.mapper_attempts.finished_count()
+        } else {
+            0
+        }
     }
 
     /// Mark a partition as successfully pushed (written).
@@ -588,8 +847,35 @@ impl LifecycleManager {
     }
 
     /// Unregister a shuffle.
+    ///
+    /// This will trigger stage_end if it hasn't been called yet,
+    /// then unregister the shuffle from the Master.
     pub async fn unregister_shuffle(&self, shuffle_id: i32) -> Result<()> {
         info!("Unregistering shuffle {}", shuffle_id);
+
+        // If stage end has not been handled, trigger it first
+        if !self.is_stage_end(shuffle_id).await {
+            info!("Triggering stage_end before unregister for shuffle {}", shuffle_id);
+            
+            // Trigger stage end
+            let _ = self.stage_end(shuffle_id).await;
+            
+            // Wait for stage end with timeout (default 5 minutes)
+            let timeout_ms = self.config.push_timeout.as_millis() as u64;
+            let (is_timeout, cost) = self.wait_stage_end(shuffle_id, timeout_ms).await;
+            
+            if is_timeout {
+                warn!(
+                    "[unregister_shuffle] Stage end timeout for shuffle {} after {}ms",
+                    shuffle_id, cost
+                );
+            } else {
+                info!(
+                    "[unregister_shuffle] Stage end completed for shuffle {} in {}ms",
+                    shuffle_id, cost
+                );
+            }
+        }
 
         let request = PbUnregisterShuffle {
             app_id: self.config.app_id.clone(),
@@ -802,5 +1088,250 @@ mod tests {
 
         assert_eq!(manager.shuffle_key(1), "test-app-1");
         assert_eq!(manager.shuffle_key(42), "test-app-42");
+    }
+
+    #[test]
+    fn test_stage_end_status_enum() {
+        // Test StageEndStatus enum values
+        assert_eq!(StageEndStatus::NotEnded, StageEndStatus::NotEnded);
+        assert_eq!(StageEndStatus::InProgress, StageEndStatus::InProgress);
+        assert_eq!(StageEndStatus::Success, StageEndStatus::Success);
+        assert_eq!(StageEndStatus::DataLost, StageEndStatus::DataLost);
+        
+        // Test that different variants are not equal
+        assert_ne!(StageEndStatus::NotEnded, StageEndStatus::InProgress);
+        assert_ne!(StageEndStatus::Success, StageEndStatus::DataLost);
+    }
+
+    #[test]
+    fn test_mapper_attempt_state_new() {
+        let state = MapperAttemptState::new(5);
+        assert_eq!(state.attempts.len(), 5);
+        assert!(!state.all_finished());
+        assert_eq!(state.finished_count(), 0);
+    }
+
+    #[test]
+    fn test_mapper_attempt_state_finish_attempt() {
+        let state = MapperAttemptState::new(3);
+        
+        // First attempt for mapper 0 should succeed
+        assert!(state.finish_attempt(0, 0));
+        assert_eq!(state.finished_count(), 1);
+        
+        // Second attempt for same mapper should fail (already finished)
+        assert!(!state.finish_attempt(0, 1));
+        assert_eq!(state.finished_count(), 1);
+        
+        // First attempt for mapper 1 should succeed
+        assert!(state.finish_attempt(1, 0));
+        assert_eq!(state.finished_count(), 2);
+        
+        // First attempt for mapper 2 should succeed
+        assert!(state.finish_attempt(2, 0));
+        assert_eq!(state.finished_count(), 3);
+        
+        // All mappers should be finished now
+        assert!(state.all_finished());
+    }
+
+    #[test]
+    fn test_mapper_attempt_state_invalid_map_id() {
+        let state = MapperAttemptState::new(3);
+        
+        // Negative map_id should fail
+        assert!(!state.finish_attempt(-1, 0));
+        
+        // Out of bounds map_id should fail
+        assert!(!state.finish_attempt(3, 0));
+        assert!(!state.finish_attempt(100, 0));
+        
+        // Valid map_id should succeed
+        assert!(state.finish_attempt(0, 0));
+    }
+
+    #[test]
+    fn test_mapper_attempt_state_all_finished() {
+        let state = MapperAttemptState::new(2);
+        
+        assert!(!state.all_finished());
+        
+        state.finish_attempt(0, 0);
+        assert!(!state.all_finished());
+        
+        state.finish_attempt(1, 0);
+        assert!(state.all_finished());
+    }
+
+    #[test]
+    fn test_shuffle_state_new() {
+        let state = ShuffleState::new(4, 10);
+        
+        assert_eq!(state.num_mappers, 4);
+        assert_eq!(state.num_partitions, 10);
+        assert!(!state.registered.load(Ordering::Relaxed));
+        assert!(state.partition_locations.is_empty());
+        assert!(state.committed_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_shuffle_state_stage_end_status() {
+        let state = ShuffleState::new(2, 4);
+        
+        // Initial status should be NotEnded
+        {
+            let status = state.stage_end_status.read().await;
+            assert_eq!(*status, StageEndStatus::NotEnded);
+        }
+        
+        // Update to InProgress
+        {
+            let mut status = state.stage_end_status.write().await;
+            *status = StageEndStatus::InProgress;
+        }
+        
+        // Verify InProgress
+        {
+            let status = state.stage_end_status.read().await;
+            assert_eq!(*status, StageEndStatus::InProgress);
+        }
+        
+        // Update to Success
+        {
+            let mut status = state.stage_end_status.write().await;
+            *status = StageEndStatus::Success;
+        }
+        
+        // Verify Success
+        {
+            let status = state.stage_end_status.read().await;
+            assert_eq!(*status, StageEndStatus::Success);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_manager_stage_end_not_registered() {
+        let config = Arc::new(
+            CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let transport = Arc::new(TransportClient::new(config.clone()).unwrap());
+        let manager = LifecycleManager::new(config, transport);
+        
+        // Stage end for non-registered shuffle should return Success
+        let result = manager.stage_end(999).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), StageEndStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_manager_is_stage_end() {
+        let config = Arc::new(
+            CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let transport = Arc::new(TransportClient::new(config.clone()).unwrap());
+        let manager = LifecycleManager::new(config, transport);
+        
+        // Non-existent shuffle should be considered ended
+        assert!(manager.is_stage_end(999).await);
+        assert!(manager.is_stage_end_or_in_progress(999).await);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_manager_get_stage_end_status() {
+        let config = Arc::new(
+            CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let transport = Arc::new(TransportClient::new(config.clone()).unwrap());
+        let manager = LifecycleManager::new(config, transport);
+        
+        // Non-existent shuffle should return Success
+        let status = manager.get_stage_end_status(999).await;
+        assert_eq!(status, StageEndStatus::Success);
+    }
+
+    #[test]
+    fn test_lifecycle_manager_all_mappers_finished() {
+        let config = Arc::new(
+            CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let transport = Arc::new(TransportClient::new(config.clone()).unwrap());
+        let manager = LifecycleManager::new(config, transport);
+        
+        // Non-existent shuffle should return false
+        assert!(!manager.all_mappers_finished(999));
+        assert_eq!(manager.finished_mapper_count(999), 0);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_manager_wait_stage_end_not_registered() {
+        let config = Arc::new(
+            CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .build()
+                .unwrap(),
+        );
+        let transport = Arc::new(TransportClient::new(config.clone()).unwrap());
+        let manager = LifecycleManager::new(config, transport);
+        
+        // Wait for non-existent shuffle should return immediately (not timeout)
+        let (is_timeout, wait_time) = manager.wait_stage_end(999, 1000).await;
+        assert!(!is_timeout);
+        assert!(wait_time < 100); // Should be very fast
+    }
+
+    #[tokio::test]
+    async fn test_stage_end_status_clone_and_copy() {
+        let status1 = StageEndStatus::Success;
+        let status2 = status1; // Copy
+        let status3 = status1.clone(); // Clone
+        
+        assert_eq!(status1, status2);
+        assert_eq!(status1, status3);
+    }
+
+    #[test]
+    fn test_mapper_attempt_state_concurrent_finish() {
+        use std::thread;
+        
+        let state = Arc::new(MapperAttemptState::new(100));
+        let mut handles = vec![];
+        
+        // Spawn multiple threads trying to finish the same mappers
+        for map_id in 0..100 {
+            let state_clone = state.clone();
+            handles.push(thread::spawn(move || {
+                // Multiple attempts for the same mapper
+                let result1 = state_clone.finish_attempt(map_id, 0);
+                let result2 = state_clone.finish_attempt(map_id, 1);
+                // Only one should succeed
+                result1 || result2
+            }));
+        }
+        
+        // Wait for all threads
+        for handle in handles {
+            assert!(handle.join().unwrap());
+        }
+        
+        // All mappers should be finished
+        assert!(state.all_finished());
+        assert_eq!(state.finished_count(), 100);
     }
 }

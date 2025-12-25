@@ -135,13 +135,16 @@ impl CelebornClient {
     /// * `map_id` - The map task ID
     /// * `attempt_id` - The attempt ID
     /// * `num_mappers` - Total number of mappers
+    ///
+    /// # Returns
+    /// `true` if this is the first successful attempt for this mapper
     pub async fn mapper_end(
         &self,
         shuffle_id: i32,
         map_id: i32,
         attempt_id: i32,
         num_mappers: i32,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.lifecycle_manager
             .mapper_end(shuffle_id, map_id, attempt_id, num_mappers)
             .await

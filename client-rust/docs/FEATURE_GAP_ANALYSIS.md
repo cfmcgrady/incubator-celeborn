@@ -9,12 +9,14 @@
 | **Shuffle 注册** | `LifecycleManager::register_shuffle` (lifecycle.rs:158-346) | ✅ 完成 |
 | **Push Data** | `DataPusher::push_data` (push.rs:143-230) | ✅ 基础完成 |
 | **Push Merged Data** | `DataPusher::push_merged_data` (push.rs:233-269) | ✅ 基础完成 |
-| **Mapper End** | `LifecycleManager::mapper_end` (lifecycle.rs:389-410) | ✅ 完成 |
-| **Commit Files** | `LifecycleManager::request_commit_files` (lifecycle.rs:422-536) | ✅ 完成 |
+| **Mapper End** | `LifecycleManager::mapper_end` (lifecycle.rs:453-486) | ✅ 完成 |
+| **Stage End** | `LifecycleManager::stage_end` (lifecycle.rs:492-589) | ✅ 完成 |
+| **Wait Stage End** | `LifecycleManager::wait_stage_end` (lifecycle.rs:594-622) | ✅ 完成 |
+| **Commit Files** | `LifecycleManager::request_commit_files` (lifecycle.rs:681-795) | ✅ 完成 |
 | **Fetch Data** | `ShuffleDataIterator` (fetch.rs:36-53) | ✅ 基础完成 |
-| **心跳** | `LifecycleManager::start_heartbeat` (lifecycle.rs:103-150) | ✅ 完成 |
+| **心跳** | `LifecycleManager::start_heartbeat` (lifecycle.rs:168-215) | ✅ 完成 |
 | **LZ4/ZSTD 压缩** | `DataPusher::compress_data` (push.rs:445-473) | ✅ 完成 |
-| **Unregister Shuffle** | `LifecycleManager::unregister_shuffle` (lifecycle.rs:591-615) | ✅ 完成 |
+| **Unregister Shuffle** | `LifecycleManager::unregister_shuffle` (lifecycle.rs:853-901) | ✅ 完成 |
 | **Revive 机制** | `ReviveManager` (revive.rs) | ✅ 完成 |
 | **Partition Split** | `PartitionLocationManager`, `SplitHandler` (partition_split.rs) | ✅ 完成 |
 | **WorkerPartitionReader** | `WorkerPartitionReader`, `PartitionReader` trait (partition_reader.rs) | ✅ 完成 |
@@ -83,11 +85,12 @@
 
 ---
 
-### 4. Stage End 处理 - 🟡 中优先级
+### 4. Stage End 处理 - ✅ 已完成
 
 **Java 实现参考**：
 - `LifecycleManager::handleStageEnd` (LifecycleManager.scala:924)
-- `CommitManager::waitStageEnd` (CommitManager.scala:266)
+- `CommitHandler::tryFinalCommit` (ReducePartitionCommitHandler.scala:144-178)
+- `CommitHandler::waitStageEnd` (ReducePartitionCommitHandler.scala:353-362)
 
 **功能描述**：
 Stage 结束时：
@@ -95,10 +98,14 @@ Stage 结束时：
 - 触发 CommitFiles
 - 清理资源
 
-**Rust 需要实现**：
-- [ ] `stage_end` 方法
-- [ ] 等待所有 mapper 完成的同步机制
-- [ ] `CommitManager` 完善
+**Rust 实现状态**：
+- [x] `StageEndStatus` 枚举 (lifecycle.rs:37-48)
+- [x] `MapperAttemptState` 追踪 mapper 完成状态 (lifecycle.rs:51-94)
+- [x] `stage_end` 方法 (lifecycle.rs:492-589)
+- [x] `wait_stage_end` 等待超时机制 (lifecycle.rs:594-622)
+- [x] `is_stage_end`, `is_stage_end_or_in_progress`, `get_stage_end_status` 查询方法
+- [x] `all_mappers_finished`, `finished_mapper_count` 统计方法
+- [x] 与 `unregister_shuffle` 集成，自动触发 stage_end
 
 ---
 
@@ -203,11 +210,11 @@ Phase 1 (核心功能) - 生产可用的最小集:
 ├── ✅ Revive 机制 (已完成)
 ├── ✅ Partition Split (已完成)
 ├── ✅ WorkerPartitionReader (已完成)
+├── ✅ Stage End 处理 (已完成)
 ├── Push 重试与回调
 └── Worker 状态追踪
 
 Phase 2 (完整性) - 功能完备:
-├── Stage End 处理
 ├── LocalPartitionReader
 └── DfsPartitionReader
 
