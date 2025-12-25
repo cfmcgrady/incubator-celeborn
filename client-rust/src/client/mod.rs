@@ -21,6 +21,7 @@ pub mod push;
 pub mod fetch;
 pub mod revive;
 pub mod partition_split;
+pub mod partition_reader;
 
 pub use lifecycle::LifecycleManager;
 pub use shuffle::ShuffleClient;
@@ -28,6 +29,10 @@ pub use revive::{ReviveManager, ReviveRequest, ReviveResult};
 pub use partition_split::{
     PartitionLocationManager, PartitionLocationWithSplit, SplitHandler,
     SplitRange, SplitStatus, ChangePartitionRequest
+};
+pub use partition_reader::{
+    PartitionReader, WorkerPartitionReader, WorkerPartitionReaderBuilder,
+    WorkerPartitionReaderConfig
 };
 
 use std::sync::Arc;

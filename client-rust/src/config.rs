@@ -128,6 +128,14 @@ pub struct CelebornConfig {
     #[serde(default = "default_max_in_flight")]
     pub max_in_flight_requests: usize,
 
+    /// Maximum in-flight fetch requests for partition reader
+    #[serde(default = "default_fetch_max_reqs_in_flight")]
+    pub fetch_max_reqs_in_flight: usize,
+
+    /// Maximum retries for fetch operations
+    #[serde(default = "default_max_fetch_retries")]
+    pub max_fetch_retries: u32,
+
     /// Connection pool size per worker
     #[serde(default = "default_connection_pool_size")]
     pub connection_pool_size: usize,
@@ -192,12 +200,46 @@ fn default_connection_pool_size() -> usize {
     4
 }
 
+fn default_fetch_max_reqs_in_flight() -> usize {
+    3
+}
+
+fn default_max_fetch_retries() -> u32 {
+    3
+}
+
 fn default_heartbeat_interval() -> Duration {
     Duration::from_secs(15)
 }
 
 fn default_storage_types() -> Vec<StorageType> {
     vec![StorageType::Hdd, StorageType::Ssd]
+}
+
+impl Default for CelebornConfig {
+    fn default() -> Self {
+        Self {
+            app_id: "default-app".to_string(),
+            master_endpoints: vec!["localhost:9097".to_string()],
+            push_replicate_enabled: default_push_replicate_enabled(),
+            push_timeout: default_push_timeout(),
+            fetch_timeout: default_fetch_timeout(),
+            rpc_timeout: default_rpc_timeout(),
+            max_retries: default_max_retries(),
+            retry_wait: default_retry_wait(),
+            compression_codec: CompressionCodec::default(),
+            partition_split_threshold: default_partition_split_threshold(),
+            partition_split_mode: PartitionSplitMode::default(),
+            push_buffer_size: default_push_buffer_size(),
+            max_in_flight_requests: default_max_in_flight(),
+            fetch_max_reqs_in_flight: default_fetch_max_reqs_in_flight(),
+            max_fetch_retries: default_max_fetch_retries(),
+            connection_pool_size: default_connection_pool_size(),
+            heartbeat_interval: default_heartbeat_interval(),
+            user_identifier: None,
+            available_storage_types: default_storage_types(),
+        }
+    }
 }
 
 impl CelebornConfig {
@@ -247,6 +289,8 @@ pub struct CelebornConfigBuilder {
     partition_split_mode: Option<PartitionSplitMode>,
     push_buffer_size: Option<usize>,
     max_in_flight_requests: Option<usize>,
+    fetch_max_reqs_in_flight: Option<usize>,
+    max_fetch_retries: Option<u32>,
     connection_pool_size: Option<usize>,
     heartbeat_interval: Option<Duration>,
     user_identifier: Option<UserIdentifier>,
@@ -359,6 +403,8 @@ impl CelebornConfigBuilder {
             partition_split_mode: self.partition_split_mode.unwrap_or_default(),
             push_buffer_size: self.push_buffer_size.unwrap_or_else(default_push_buffer_size),
             max_in_flight_requests: self.max_in_flight_requests.unwrap_or_else(default_max_in_flight),
+            fetch_max_reqs_in_flight: self.fetch_max_reqs_in_flight.unwrap_or_else(default_fetch_max_reqs_in_flight),
+            max_fetch_retries: self.max_fetch_retries.unwrap_or_else(default_max_fetch_retries),
             connection_pool_size: self.connection_pool_size.unwrap_or_else(default_connection_pool_size),
             heartbeat_interval: self.heartbeat_interval.unwrap_or_else(default_heartbeat_interval),
             user_identifier: self.user_identifier,

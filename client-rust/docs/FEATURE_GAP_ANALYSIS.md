@@ -17,6 +17,7 @@
 | **Unregister Shuffle** | `LifecycleManager::unregister_shuffle` (lifecycle.rs:591-615) | ✅ 完成 |
 | **Revive 机制** | `ReviveManager` (revive.rs) | ✅ 完成 |
 | **Partition Split** | `PartitionLocationManager`, `SplitHandler` (partition_split.rs) | ✅ 完成 |
+| **WorkerPartitionReader** | `WorkerPartitionReader`, `PartitionReader` trait (partition_reader.rs) | ✅ 完成 |
 
 ---
 
@@ -42,7 +43,7 @@
 
 ---
 
-### 2. 多种 PartitionReader - 🟡 中优先级
+### 2. 多种 PartitionReader - 🟡 中优先级 (部分完成)
 
 **Java 实现参考**：
 - `WorkerPartitionReader` (WorkerPartitionReader.java) - 从 Worker 读取
@@ -52,12 +53,13 @@
 **功能描述**：
 支持从不同存储位置读取 shuffle 数据
 
-**Rust 需要实现**：
-- [ ] `PartitionReader` trait 定义
-- [ ] `WorkerPartitionReader` - 从 Worker 读取（当前 ShuffleDataIterator 部分实现）
+**Rust 实现状态**：
+- [x] `PartitionReader` trait 定义 (partition_reader.rs:46-62)
+- [x] `WorkerPartitionReader` - 从 Worker 读取 (partition_reader.rs:118-500)
+- [x] Chunk 预取机制 (`fetch_max_reqs_in_flight`) (partition_reader.rs:240-290)
+- [x] `WorkerPartitionReaderBuilder` 构建器模式 (partition_reader.rs:510-570)
 - [ ] `LocalPartitionReader` - 本地磁盘读取
 - [ ] `DfsPartitionReader` - 分布式文件系统读取（HDFS/S3）
-- [ ] Chunk 预取机制 (`fetchChunks`)
 
 ---
 
@@ -200,12 +202,14 @@ Stage 结束时：
 Phase 1 (核心功能) - 生产可用的最小集:
 ├── ✅ Revive 机制 (已完成)
 ├── ✅ Partition Split (已完成)
+├── ✅ WorkerPartitionReader (已完成)
 ├── Push 重试与回调
 └── Worker 状态追踪
 
 Phase 2 (完整性) - 功能完备:
 ├── Stage End 处理
-└── 多种 PartitionReader
+├── LocalPartitionReader
+└── DfsPartitionReader
 
 Phase 3 (生产就绪) - 稳定性增强:
 ├── CelebornInputStream
