@@ -14,6 +14,18 @@
 // limitations under the License.
 
 //! Celeborn client implementations.
+//!
+//! This module provides two client architectures:
+//!
+//! ## Single-Process Architecture (Original)
+//! - [`CelebornClient`] - High-level client combining lifecycle and shuffle operations
+//! - [`LifecycleManager`] - Local lifecycle management (runs in same process)
+//! - [`ShuffleClient`] - Shuffle data operations
+//!
+//! ## Driver-Executor Separation Architecture (For Comet/Spark)
+//! - [`ExecutorShuffleClient`] - Executor-side client that connects to remote LifecycleManager
+//! - [`LifecycleManagerClient`] - Trait for RPC communication with LifecycleManager
+//! - [`NettyLifecycleManagerClient`] - Implementation connecting to Java LifecycleManager via Netty RPC
 
 pub mod lifecycle;
 pub mod shuffle;
@@ -23,6 +35,8 @@ pub mod revive;
 pub mod partition_split;
 pub mod partition_reader;
 pub mod input_stream;
+pub mod lifecycle_client;
+pub mod executor_shuffle_client;
 
 pub use lifecycle::LifecycleManager;
 pub use shuffle::ShuffleClient;
@@ -40,6 +54,13 @@ pub use input_stream::{
     MetricsCallback, NoOpMetricsCallback, AsyncCelebornInputStream,
     PushFailedBatch, ChunkRange, CelebornAsyncReader
 };
+
+// Driver-Executor separation architecture exports
+pub use lifecycle_client::{
+    LifecycleManagerClient, NettyLifecycleManagerClient, LocalLifecycleManagerClient,
+    RegisterShuffleResponse, MapperEndResponse, ReducerFileGroupResponse, ReviveResponse,
+};
+pub use executor_shuffle_client::ExecutorShuffleClient;
 
 use std::sync::Arc;
 

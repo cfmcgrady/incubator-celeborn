@@ -29,32 +29,55 @@
 //! - Fetch shuffle data from Celeborn workers
 //! - Handle partition management and failover
 //!
-//! ## Example
+//! ## Client Architectures
+//!
+//! ### Single-Process Architecture
+//!
+//! Use [`CelebornClient`] when both lifecycle management and shuffle operations
+//! run in the same process:
 //!
 //! ```rust,no_run
 //! use celeborn_client::{CelebornClient, CelebornConfig};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create configuration
 //!     let config = CelebornConfig::builder()
 //!         .master_endpoints(vec!["localhost:9097".to_string()])
 //!         .app_id("my-app-001")
 //!         .build()?;
 //!
-//!     // Create client
 //!     let client = CelebornClient::new(config).await?;
-//!
-//!     // Register a shuffle
 //!     let shuffle_id = client.register_shuffle(0, 10, 100).await?;
-//!
-//!     // Push data (shuffle_id, map_id, attempt_id, partition_id, data)
-//!     let data = vec![1u8, 2, 3, 4, 5];
-//!     client.push_data(shuffle_id, 0, 0, 0, &data).await?;
-//!
-//!     // Commit and fetch
+//!     client.push_data(shuffle_id, 0, 0, 0, &[1, 2, 3]).await?;
 //!     client.mapper_end(shuffle_id, 0, 0, 10).await?;
+//!     Ok(())
+//! }
+//! ```
 //!
+//! ### Driver-Executor Separation Architecture (Comet/Spark)
+//!
+//! Use [`ExecutorShuffleClient`] when the LifecycleManager runs in a separate
+//! process (e.g., Spark Driver with Java LifecycleManager, Executors with Rust client):
+//!
+//! ```rust,no_run
+//! use celeborn_client::{ExecutorShuffleClient, CelebornConfig};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let config = CelebornConfig::builder()
+//!         .master_endpoints(vec!["localhost:9097".to_string()])
+//!         .app_id("my-app-001")
+//!         .build()?;
+//!
+//!     let client = ExecutorShuffleClient::new(config);
+//!
+//!     // Connect to Java LifecycleManager running in Driver
+//!     client.setup_lifecycle_manager_ref("driver-host", 9098).await?;
+//!
+//!     // Now use the client for shuffle operations
+//!     let shuffle_id = client.register_shuffle(0, 10, 100).await?;
+//!     client.push_data(shuffle_id, 0, 0, 0, &[1, 2, 3]).await?;
+//!     client.mapper_end(shuffle_id, 0, 0, 10).await?;
 //!     Ok(())
 //! }
 //! ```
@@ -65,8 +88,14 @@ pub mod error;
 pub mod network;
 pub mod protocol;
 
-// Re-exports for convenience
+// Re-exports for convenience - Single-process architecture
 pub use client::{CelebornClient, ShuffleClient};
 pub use config::CelebornConfig;
 pub use error::{CelebornError, Result};
 pub use protocol::PartitionLocation;
+
+// Re-exports for Driver-Executor separation architecture (Comet/Spark)
+pub use client::{
+    ExecutorShuffleClient, LifecycleManagerClient, NettyLifecycleManagerClient,
+    LocalLifecycleManagerClient,
+};
