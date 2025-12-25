@@ -29,7 +29,7 @@ import scala.collection.JavaConverters._
 import com.google.common.annotations.VisibleForTesting
 import io.netty.util.HashedWheelTimer
 
-import org.apache.celeborn.common.CelebornConf
+import org.apache.celeborn.common.{CelebornBuildInfo, CelebornConf}
 import org.apache.celeborn.common.CelebornConf._
 import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.exception.CelebornException
@@ -544,7 +544,8 @@ private[celeborn] class Worker(
               // StorageManager have update the disk info.
               workerInfo.diskInfos.asScala.toMap,
               handleResourceConsumption().asScala.toMap,
-              MasterClient.genRequestId()),
+              MasterClient.genRequestId(),
+              CelebornBuildInfo.celebornVersion),
             classOf[PbRegisterWorkerResponse])
         } catch {
           case throwable: Throwable =>
@@ -554,11 +555,15 @@ private[celeborn] class Worker(
             exception = throwable
             null
         }
-      // Register successfully
-      if (null != resp && resp.getSuccess) {
-        registered.set(true)
-        logInfo("Register worker successfully.")
-        return
+      if (null != resp) {
+        if (resp.getSuccess) {
+          // Register successfully
+          registered.set(true)
+          logInfo("Register worker successfully.")
+          return
+        } else if (resp.getMessage.contains("IllegalVersion")) {
+          throw new CelebornException(s"Register worker failed. reason: ${resp.getMessage}")
+        }
       }
       // Register failed, sleep and retry
       Thread.sleep(interval)

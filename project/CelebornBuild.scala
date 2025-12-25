@@ -31,6 +31,7 @@ import sbt._
 import sbt.Keys._
 import Utils._
 import CelebornCommonSettings._
+import org.apache.celeborn.build.CelebornBuildInfoPlugin
 // import sbt.Keys.streams
 
 object Dependencies {
@@ -404,6 +405,7 @@ object Utils {
 
 object CelebornCommon {
   lazy val common = Project("celeborn-common", file("common"))
+    .enablePlugins(CelebornBuildInfoPlugin)
     .settings (
       commonSettings,
       protoSettings,
@@ -438,20 +440,6 @@ object CelebornCommon {
         Dependencies.log4jSlf4jImpl % "test",
         Dependencies.log4j12Api % "test"
       ) ++ commonUnitTestDependencies,
-
-      Compile / sourceGenerators += Def.task {
-        val file = (Compile / sourceManaged).value / "org" / "apache" / "celeborn" / "package.scala"
-        streams.value.log.info(s"geneate version information file ${file.toPath}")
-        IO.write(file,
-          s"""package org.apache
-             |
-             |package object celeborn {
-             |  val VERSION = "${version.value}"
-             |}
-             |""".stripMargin)
-        Seq(file)
-        // generate version task depends on PB generate to avoid concurrency generate source files
-      }.dependsOn(Compile / PB.generate),
 
       // a task to show current profiles
       printProfiles := {

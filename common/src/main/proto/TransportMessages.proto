@@ -173,6 +173,7 @@ message PbRegisterWorker {
   repeated PbDiskInfo disks = 6;
   string requestId = 9;
   map<string, PbResourceConsumption> userResourceConsumption = 8;
+  string version = 10;
 }
 
 message PbHeartbeatFromWorker {
