@@ -20,10 +20,15 @@ pub mod shuffle;
 pub mod push;
 pub mod fetch;
 pub mod revive;
+pub mod partition_split;
 
 pub use lifecycle::LifecycleManager;
 pub use shuffle::ShuffleClient;
 pub use revive::{ReviveManager, ReviveRequest, ReviveResult};
+pub use partition_split::{
+    PartitionLocationManager, PartitionLocationWithSplit, SplitHandler,
+    SplitRange, SplitStatus, ChangePartitionRequest
+};
 
 use std::sync::Arc;
 

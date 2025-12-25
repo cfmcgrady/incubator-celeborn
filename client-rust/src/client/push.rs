@@ -26,6 +26,7 @@ use tokio::sync::Semaphore;
 use tracing::{debug, trace, warn};
 
 use crate::client::lifecycle::LifecycleManager;
+use crate::client::partition_split::{PartitionLocationManager, PartitionLocationWithSplit, SplitHandler, SplitStatus};
 use crate::client::revive::ReviveManager;
 use crate::config::{CelebornConfig, CompressionCodec};
 use crate::error::{CelebornError, Result, StatusCode};
@@ -52,6 +53,8 @@ pub struct DataPusher {
     lifecycle_manager: Arc<LifecycleManager>,
     /// Revive manager for handling push failures
     revive_manager: Option<Arc<ReviveManager>>,
+    /// Split handler for partition split operations
+    split_handler: Option<Arc<SplitHandler>>,
     /// Connection pool for push connections
     push_connection_pool: ConnectionPool,
     /// Pending push buffers (partition_id -> buffer)
@@ -133,6 +136,7 @@ impl DataPusher {
             transport_client,
             lifecycle_manager,
             revive_manager: None,
+            split_handler: None,
             push_connection_pool,
             pending_buffers: DashMap::new(),
             in_flight_semaphore,
@@ -160,11 +164,51 @@ impl DataPusher {
             transport_client,
             lifecycle_manager,
             revive_manager: Some(revive_manager),
+            split_handler: None,
             push_connection_pool,
             pending_buffers: DashMap::new(),
             in_flight_semaphore,
             max_revive_retries,
         }
+    }
+
+    /// Create a new data pusher with revive manager and split handler.
+    pub fn with_revive_and_split(
+        config: Arc<CelebornConfig>,
+        transport_client: Arc<TransportClient>,
+        lifecycle_manager: Arc<LifecycleManager>,
+        revive_manager: Arc<ReviveManager>,
+        split_handler: Arc<SplitHandler>,
+    ) -> Self {
+        let push_connection_pool = ConnectionPool::new(
+            config.connection_pool_size,
+            config.max_in_flight_requests,
+        );
+
+        let in_flight_semaphore = Arc::new(Semaphore::new(config.max_in_flight_requests * 4));
+        let max_revive_retries = config.max_retries;
+
+        Self {
+            config,
+            transport_client,
+            lifecycle_manager,
+            revive_manager: Some(revive_manager),
+            split_handler: Some(split_handler),
+            push_connection_pool,
+            pending_buffers: DashMap::new(),
+            in_flight_semaphore,
+            max_revive_retries,
+        }
+    }
+
+    /// Set the split handler.
+    pub fn set_split_handler(&mut self, split_handler: Arc<SplitHandler>) {
+        self.split_handler = Some(split_handler);
+    }
+
+    /// Get the split handler.
+    pub fn split_handler(&self) -> Option<&Arc<SplitHandler>> {
+        self.split_handler.as_ref()
     }
 
     /// Push data to a partition with automatic revive on failure.
@@ -646,6 +690,64 @@ impl DataPusher {
                 }
             }
         }
+    }
+
+    /// Handle a push response that may indicate split is needed.
+    ///
+    /// This method should be called when processing push responses from workers.
+    /// If the response indicates SOFT_SPLIT or HARD_SPLIT, it will trigger
+    /// the appropriate split handling logic.
+    ///
+    /// # Arguments
+    /// * `shuffle_id` - The shuffle ID
+    /// * `partition_id` - The partition ID
+    /// * `epoch` - The current epoch of the partition
+    /// * `response_status` - The status byte from the push response
+    /// * `current_location` - The current partition location
+    ///
+    /// # Returns
+    /// * `Ok(Some(location))` - A new location was allocated (HARD_SPLIT)
+    /// * `Ok(None)` - No new location needed yet (SOFT_SPLIT or success)
+    /// * `Err(_)` - An error occurred
+    pub async fn handle_push_response_split(
+        &self,
+        shuffle_id: i32,
+        partition_id: i32,
+        epoch: i32,
+        response_status: u8,
+        current_location: Option<PartitionLocation>,
+    ) -> Result<Option<PartitionLocation>> {
+        // Check if this is a split response
+        if !SplitHandler::is_split_response(response_status) {
+            return Ok(None);
+        }
+
+        if let Some(ref split_handler) = self.split_handler {
+            let current_loc_with_split = current_location.map(PartitionLocationWithSplit::new);
+            
+            match split_handler.handle_push_response(
+                shuffle_id,
+                partition_id,
+                epoch,
+                response_status,
+                current_loc_with_split,
+            ).await? {
+                Some(new_loc) => Ok(Some(new_loc.location)),
+                None => Ok(None),
+            }
+        } else {
+            // No split handler configured, treat as success
+            debug!(
+                "Split response received but no split handler configured for partition {}",
+                partition_id
+            );
+            Ok(None)
+        }
+    }
+
+    /// Check if a response status indicates a split is needed.
+    pub fn is_split_response(response_status: u8) -> bool {
+        SplitHandler::is_split_response(response_status)
     }
 }
 

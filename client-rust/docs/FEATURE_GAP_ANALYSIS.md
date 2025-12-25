@@ -16,32 +16,13 @@
 | **LZ4/ZSTD 压缩** | `DataPusher::compress_data` (push.rs:445-473) | ✅ 完成 |
 | **Unregister Shuffle** | `LifecycleManager::unregister_shuffle` (lifecycle.rs:591-615) | ✅ 完成 |
 | **Revive 机制** | `ReviveManager` (revive.rs) | ✅ 完成 |
+| **Partition Split** | `PartitionLocationManager`, `SplitHandler` (partition_split.rs) | ✅ 完成 |
 
 ---
 
 ## 二、缺失的核心功能 ❌
 
-### 1. Partition Split（分区拆分）- 🔴 高优先级
-
-**Java 实现参考**：
-- `PartitionLocationManager::split` (PartitionLocationManager.java:140-156)
-- `ChangePartitionManager` (ChangePartitionManager.scala)
-
-**功能描述**：
-当分区数据量超过阈值时：
-- 自动拆分分区
-- 管理 epoch 版本
-- 处理多个子分区
-
-**Rust 需要实现**：
-- [ ] `PartitionLocationManager` - 管理分区位置和子分区
-- [ ] 分区拆分阈值检测
-- [ ] Epoch 管理
-- [ ] `SplitInfo` 结构体
-
----
-
-### 2. Push 重试与回调机制 - 🔴 高优先级
+### 1. Push 重试与回调机制 - 🔴 高优先级
 
 **Java 实现参考**：
 - `ShuffleClientImpl::submitRetryPushData` (ShuffleClientImpl.java:235-327)
@@ -61,7 +42,7 @@
 
 ---
 
-### 3. 多种 PartitionReader - 🟡 中优先级
+### 2. 多种 PartitionReader - 🟡 中优先级
 
 **Java 实现参考**：
 - `WorkerPartitionReader` (WorkerPartitionReader.java) - 从 Worker 读取
@@ -80,7 +61,7 @@
 
 ---
 
-### 4. Worker 状态追踪 - 🟡 中优先级
+### 3. Worker 状态追踪 - 🟡 中优先级
 
 **Java 实现参考**：
 - `WorkerStatusTracker` (WorkerStatusTracker.scala)
@@ -100,7 +81,7 @@
 
 ---
 
-### 5. Stage End 处理 - 🟡 中优先级
+### 4. Stage End 处理 - 🟡 中优先级
 
 **Java 实现参考**：
 - `LifecycleManager::handleStageEnd` (LifecycleManager.scala:924)
@@ -119,7 +100,7 @@ Stage 结束时：
 
 ---
 
-### 6. CelebornInputStream - 🟡 中优先级
+### 5. CelebornInputStream - 🟡 中优先级
 
 **Java 实现参考**：
 - `CelebornInputStream` (CelebornInputStream.java)
@@ -139,7 +120,7 @@ Stage 结束时：
 
 ---
 
-### 7. Shuffle 过期清理 - 🟢 低优先级
+### 6. Shuffle 过期清理 - 🟢 低优先级
 
 **Java 实现参考**：
 - `LifecycleManager` 中的定期清理逻辑
@@ -218,11 +199,11 @@ Stage 结束时：
 ```
 Phase 1 (核心功能) - 生产可用的最小集:
 ├── ✅ Revive 机制 (已完成)
+├── ✅ Partition Split (已完成)
 ├── Push 重试与回调
 └── Worker 状态追踪
 
 Phase 2 (完整性) - 功能完备:
-├── Partition Split
 ├── Stage End 处理
 └── 多种 PartitionReader
 
