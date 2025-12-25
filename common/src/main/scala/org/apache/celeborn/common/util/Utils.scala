@@ -1139,4 +1139,46 @@ object Utils extends Logging {
   private val dateFmt: FastDateFormat =
     FastDateFormat.getInstance("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.ROOT)
   def formatTimestamp(timestamp: Long): String = dateFmt.format(timestamp)
+
+  def isWorkerVersionCompatible(masterVersion: String, workerVersion: String): Boolean = {
+    // Remove 'v' prefix and '-SNAPSHOT' suffix
+    def parseVersion(version: String): Array[Int] = {
+      val cleanVersion = version.stripPrefix("v").split("-")(0)
+      cleanVersion.split("\\.").map(_.toInt)
+    }
+
+    try {
+      if (Option(workerVersion).forall(_.isEmpty)) {
+        logWarning(s"Worker version is null or empty, masterVersion: $masterVersion")
+        return false
+      }
+
+      val masterParts = parseVersion(masterVersion)
+      val workerParts = parseVersion(workerVersion)
+      val maxLength = Math.max(masterParts.length, workerParts.length)
+
+      // Pad with zeros if needed
+      val masterVersionArray = masterParts.padTo(maxLength, 0)
+      val workerVersionArray = workerParts.padTo(maxLength, 0)
+
+      // Compare from W to Z (left to right)
+      // version name refer to https://docs.xiaohongshu.com/doc/dff62f993cfe7e349260939647466bcf
+      for (i <- 0 until maxLength) {
+        if (workerVersionArray(i) > masterVersionArray(i)) {
+          return true
+        } else if (workerVersionArray(i) < masterVersionArray(i)) {
+          return false
+        }
+      }
+      // Equal versions
+      true
+    } catch {
+      case e: Exception =>
+        logError(
+          s"Failed to compare celeborn versions. masterVersion: $masterVersion, " +
+            s"workerVersion: $workerVersion",
+          e)
+        false
+    }
+  }
 }

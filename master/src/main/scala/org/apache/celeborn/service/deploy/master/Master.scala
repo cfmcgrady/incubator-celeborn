@@ -30,7 +30,7 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.ratis.proto.RaftProtos
 import org.apache.ratis.proto.RaftProtos.RaftPeerRole
 
-import org.apache.celeborn.common.CelebornConf
+import org.apache.celeborn.common.{CelebornBuildInfo, CelebornConf}
 import org.apache.celeborn.common.client.MasterClient
 import org.apache.celeborn.common.identity.UserIdentifier
 import org.apache.celeborn.common.internal.Logging
@@ -377,6 +377,7 @@ private[celeborn] class Master(
         .toMap.asJava
       val userResourceConsumption =
         PbSerDeUtils.fromPbUserResourceConsumption(pbRegisterWorker.getUserResourceConsumptionMap)
+      val workerVersion = pbRegisterWorker.getVersion
 
       logDebug(s"Received RegisterWorker request $requestId, $host:$pushPort:$replicatePort" +
         s" $disks.")
@@ -391,7 +392,8 @@ private[celeborn] class Master(
           replicatePort,
           disks,
           userResourceConsumption,
-          requestId))
+          requestId,
+          workerVersion))
 
     case ReleaseSlots(_, _, _, _, _) =>
       // keep it for compatible reason
@@ -672,7 +674,18 @@ private[celeborn] class Master(
       replicatePort: Int,
       disks: util.Map[String, DiskInfo],
       userResourceConsumption: util.Map[UserIdentifier, ResourceConsumption],
-      requestId: String): Unit = {
+      requestId: String,
+      workerVersion: String): Unit = {
+    if (!Utils.isWorkerVersionCompatible(CelebornBuildInfo.celebornVersion, workerVersion)) {
+      val msg = s"[IllegalVersion], refuse to register." +
+        s"masterVersion: ${CelebornBuildInfo.celebornVersion}, " +
+        s"workerVersion: $workerVersion"
+      logError(s"Rejected worker registration due to version mismatch: " +
+        s"worker=$host:$pushPort, workerVersion=$workerVersion, " +
+        s"masterVersion=${CelebornBuildInfo.celebornVersion}")
+      context.reply(RegisterWorkerResponse(false, msg))
+      return
+    }
     val workerToRegister =
       new WorkerInfo(
         host,

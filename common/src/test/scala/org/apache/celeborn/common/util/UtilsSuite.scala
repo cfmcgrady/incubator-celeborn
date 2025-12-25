@@ -194,4 +194,50 @@ class UtilsSuite extends CelebornFunSuite {
     }
     partitionSet
   }
+  test("test worker and master version compatible") {
+    // Test clientVersion > masterVersion
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.4.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.3.1.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.3.0.1") === true)
+    assert(Utils.isWorkerVersionCompatible("v1.0.0.0", "v2.0.0.0") === true)
+
+    // Test clientVersion == masterVersion
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.3.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v1.2.3.4", "v1.2.3.4") === true)
+
+    // Test clientVersion < masterVersion
+    assert(Utils.isWorkerVersionCompatible("v0.4.0.0", "v0.3.0.0") === false)
+    assert(Utils.isWorkerVersionCompatible("v0.3.1.0", "v0.3.0.0") === false)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.1", "v0.3.0.0") === false)
+    assert(Utils.isWorkerVersionCompatible("v2.0.0.0", "v1.0.0.0") === false)
+
+    // Test with -SNAPSHOT suffix
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0-SNAPSHOT", "v0.3.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.3.0.0-SNAPSHOT") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0-SNAPSHOT", "v0.3.0.0-SNAPSHOT") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0-SNAPSHOT", "v0.4.0.0-SNAPSHOT") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.4.0.0-SNAPSHOT", "v0.3.0.0-SNAPSHOT") === false)
+
+    // Test without 'v' prefix
+    assert(Utils.isWorkerVersionCompatible("0.3.0.0", "0.4.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("0.3.0.0", "0.3.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("0.4.0.0", "0.3.0.0") === false)
+
+    // Test with different version part lengths
+    assert(Utils.isWorkerVersionCompatible("v0.3.0", "v0.3.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "v0.3.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3", "v0.3.0.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0", "v0.3.1") === true)
+    assert(Utils.isWorkerVersionCompatible("v0.3.1", "v0.3.0") === false)
+
+    // Test edge cases
+    assert(Utils.isWorkerVersionCompatible("v1.0", "v2.0") === true)
+    assert(Utils.isWorkerVersionCompatible("v10.0.0.0", "v9.0.0.0") === false)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.10", "v0.3.0.9") === false)
+
+    // Test invalid version format (should return false)
+    assert(Utils.isWorkerVersionCompatible("invalid", "v0.3.0.0") === false)
+    assert(Utils.isWorkerVersionCompatible("v0.3.0.0", "invalid") === false)
+    assert(Utils.isWorkerVersionCompatible("", "v0.3.0.0") === false)
+  }
 }
