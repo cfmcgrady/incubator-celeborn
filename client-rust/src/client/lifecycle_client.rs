@@ -53,26 +53,24 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bytes::{BufMut, Bytes, BytesMut};
-use dashmap::DashMap;
 use prost::Message;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::config::CelebornConfig;
 use crate::error::{CelebornError, Result, StatusCode};
-use crate::network::{Connection, ConnectionPool};
+use crate::network::NettyRpcClient;
 use crate::protocol::generated::{
-    PbChangeLocationResponse, PbGetReducerFileGroupResponse, PbPartitionLocation,
-    PbPartitionSplit, PbRegisterShuffle, PbRegisterShuffleResponse, PbRevive,
-    PbRevivePartitionInfo,
+    PbChangeLocationResponse, PbPartitionLocation, PbPartitionSplit, PbRegisterShuffle,
+    PbRegisterShuffleResponse, PbRevive, PbRevivePartitionInfo,
 };
+use crate::protocol::java_serialization::RpcAddress;
+use crate::protocol::transport::TransportMessageType;
 use crate::protocol::{PartitionLocation, PartitionMode};
 
 /// Request ID counter for RPC calls.
@@ -250,18 +248,12 @@ pub struct RevivePartitionInfo {
 /// This client implements the Celeborn Netty RPC protocol to communicate
 /// with the Java LifecycleManager running in the Driver process.
 pub struct NettyLifecycleManagerClient {
-    /// Configuration
-    config: Arc<CelebornConfig>,
     /// LifecycleManager host
     host: String,
     /// LifecycleManager port
     port: i32,
-    /// Connection pool
-    connection_pool: ConnectionPool,
-    /// Cached connection
-    connection: RwLock<Option<Arc<Connection>>>,
-    /// RPC timeout
-    rpc_timeout: Duration,
+    /// Netty RPC client
+    netty_client: NettyRpcClient,
 }
 
 impl NettyLifecycleManagerClient {
@@ -272,110 +264,47 @@ impl NettyLifecycleManagerClient {
     /// * `host` - LifecycleManager host
     /// * `port` - LifecycleManager port
     pub fn new(config: Arc<CelebornConfig>, host: String, port: i32) -> Self {
-        let connection_pool = ConnectionPool::new(
-            config.connection_pool_size,
-            config.max_in_flight_requests,
-        );
+        // Create Netty RPC client with local address
+        let local_address = Some(RpcAddress::new("localhost", 0));
+        let netty_client = NettyRpcClient::new(local_address, config.rpc_timeout);
 
         Self {
-            rpc_timeout: config.rpc_timeout,
-            config,
             host,
             port,
-            connection_pool,
-            connection: RwLock::new(None),
+            netty_client,
         }
     }
 
-    /// Get or create connection to LifecycleManager.
-    async fn get_connection(&self) -> Result<Arc<Connection>> {
-        // Check cached connection
-        {
-            let conn = self.connection.read().await;
-            if let Some(ref c) = *conn {
-                if c.is_active() {
-                    return Ok(c.clone());
-                }
-            }
-        }
-
-        // Create new connection
-        let addr: SocketAddr = format!("{}:{}", self.host, self.port)
-            .parse()
-            .map_err(|e| CelebornError::Connection(format!("Invalid address: {}", e)))?;
-
-        let conn = self.connection_pool.get_connection(addr).await?;
-
-        // Cache connection
-        {
-            let mut cached = self.connection.write().await;
-            *cached = Some(conn.clone());
-        }
-
-        info!(
-            "Connected to LifecycleManager at {}:{}",
-            self.host, self.port
-        );
-
-        Ok(conn)
+    /// Get the SocketAddr for the LifecycleManager.
+    fn get_addr(&self) -> Result<SocketAddr> {
+        let addr_str = format!("{}:{}", self.host, self.port);
+        addr_str
+            .to_socket_addrs()
+            .map_err(|e| CelebornError::Connection(format!("Invalid address {}: {}", addr_str, e)))?
+            .next()
+            .ok_or_else(|| CelebornError::Connection(format!("Cannot resolve {}", addr_str)))
     }
 
     /// Send RPC request and wait for response.
     ///
-    /// The Netty RPC protocol format:
-    /// - Request: TransportMessage containing protobuf payload
-    /// - Response: TransportMessage containing protobuf response
+    /// Uses the Netty RPC protocol with Java serialization.
     async fn send_rpc<Req: Message, Resp: Message + Default>(
         &self,
-        message_type: i32,
+        message_type: TransportMessageType,
         request: &Req,
     ) -> Result<Resp> {
-        let conn = self.get_connection().await?;
-
-        // Encode request as TransportMessage
-        let payload = request.encode_to_vec();
-        let mut buf = BytesMut::with_capacity(8 + payload.len());
-        buf.put_i32(message_type);
-        buf.put_i32(payload.len() as i32);
-        buf.put_slice(&payload);
+        let addr = self.get_addr()?;
 
         debug!(
-            "Sending RPC message type {} with {} bytes payload",
-            message_type,
-            payload.len()
+            "Sending RPC message type {:?} to LifecycleManager at {}:{}",
+            message_type, self.host, self.port
         );
 
-        // Send RPC and wait for response
-        let response = conn.send_rpc(buf.freeze(), self.rpc_timeout).await?;
-
-        // Decode response
-        // Response body contains: messageType (4) + payloadLen (4) + payload
-        if response.body.len() < 8 {
-            return Err(CelebornError::Protocol(format!(
-                "Response too short: {} bytes",
-                response.body.len()
-            )));
-        }
-
-        let resp_type = i32::from_be_bytes(response.body[0..4].try_into().unwrap());
-        let payload_len = i32::from_be_bytes(response.body[4..8].try_into().unwrap()) as usize;
-
-        if response.body.len() < 8 + payload_len {
-            return Err(CelebornError::Protocol(format!(
-                "Response payload incomplete: expected {} bytes, got {}",
-                payload_len,
-                response.body.len() - 8
-            )));
-        }
-
-        let resp_payload = &response.body[8..8 + payload_len];
-        let resp = Resp::decode(resp_payload).map_err(|e| {
-            CelebornError::Protocol(format!("Failed to decode response: {}", e))
-        })?;
-
-        debug!("Received RPC response type {}", resp_type);
-
-        Ok(resp)
+        // Use NettyRpcClient to send the RPC with proper Java serialization
+        // LifecycleManager endpoint name is "LifecycleManagerEndpoint"
+        self.netty_client
+            .send_rpc_to_endpoint(addr, "LifecycleManagerEndpoint", message_type, request)
+            .await
     }
 
     /// Convert PbPartitionLocation to PartitionLocation.
@@ -453,11 +382,8 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             num_partitions,
         };
 
-        // Message type for RegisterShuffle (from ControlMessages)
-        const REGISTER_SHUFFLE: i32 = 1;
-
         let response: PbRegisterShuffleResponse = self
-            .send_rpc(REGISTER_SHUFFLE, &request)
+            .send_rpc(TransportMessageType::RegisterShuffle, &request)
             .await?;
 
         let status = StatusCode::from(response.status);
@@ -492,83 +418,54 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             shuffle_id, map_id, attempt_id
         );
 
-        // MapperEnd uses Java serialization in the original protocol
-        // For now, we'll use a simplified protobuf-based approach
-        // TODO: Implement full Java serialization compatibility
-
-        // Message type for MapperEnd
-        const MAPPER_END: i32 = 7;
-
-        // Create a simple request (this needs to match Java's MapperEnd case class)
-        // The actual implementation would need Java serialization
-        let mut buf = BytesMut::new();
-        buf.put_i32(shuffle_id);
-        buf.put_i32(map_id);
-        buf.put_i32(attempt_id);
-        buf.put_i32(num_mappers);
-        buf.put_i32(partition_id);
-        // Empty push failed batches map
-        buf.put_i32(0);
-
-        let conn = self.get_connection().await?;
-
-        // Encode as TransportMessage
-        let payload = buf.freeze();
-        let mut msg = BytesMut::with_capacity(8 + payload.len());
-        msg.put_i32(MAPPER_END);
-        msg.put_i32(payload.len() as i32);
-        msg.put_slice(&payload);
-
-        let response = conn.send_rpc(msg.freeze(), self.rpc_timeout).await?;
-
-        // Parse response status
-        let status = if response.body.len() >= 12 {
-            let status_code = i32::from_be_bytes(response.body[8..12].try_into().unwrap());
-            StatusCode::from(status_code)
-        } else {
-            StatusCode::Success
+        // Create protobuf request
+        use crate::protocol::generated::{PbMapperEnd, PbMapperEndResponse};
+        let request = PbMapperEnd {
+            shuffle_id,
+            map_id,
+            attempt_id,
+            num_mappers,
+            partition_id,
+            push_failure_batches: std::collections::HashMap::new(),
         };
 
+        let response: PbMapperEndResponse = self
+            .send_rpc(TransportMessageType::MapperEnd, &request)
+            .await?;
+
+        let status = StatusCode::from(response.status);
         Ok(MapperEndResponse { status })
     }
 
     async fn get_reducer_file_group(&self, shuffle_id: i32) -> Result<ReducerFileGroupResponse> {
         debug!("GetReducerFileGroup: shuffle={}", shuffle_id);
 
-        // Message type for GetReducerFileGroup
-        const GET_REDUCER_FILE_GROUP: i32 = 8;
+        // Create protobuf request
+        use crate::protocol::generated::PbGetReducerFileGroup;
+        let request = PbGetReducerFileGroup { shuffle_id };
 
-        // Create request
-        let mut buf = BytesMut::new();
-        buf.put_i32(shuffle_id);
+        let response: crate::protocol::generated::PbGetReducerFileGroupResponse = self
+            .send_rpc(TransportMessageType::GetReducerFileGroup, &request)
+            .await?;
 
-        let conn = self.get_connection().await?;
+        let status = StatusCode::from(response.status);
 
-        let payload = buf.freeze();
-        let mut msg = BytesMut::with_capacity(8 + payload.len());
-        msg.put_i32(GET_REDUCER_FILE_GROUP);
-        msg.put_i32(payload.len() as i32);
-        msg.put_slice(&payload);
-
-        let response = conn.send_rpc(msg.freeze(), self.rpc_timeout).await?;
-
-        // Parse response
-        // This is a simplified parsing - full implementation needs Java deserialization
-        let status = if response.body.len() >= 12 {
-            let status_code = i32::from_be_bytes(response.body[8..12].try_into().unwrap());
-            StatusCode::from(status_code)
-        } else {
-            StatusCode::Success
-        };
-
-        // TODO: Parse file groups from response
-        // This requires implementing Java serialization deserialization
+        // Parse file groups from response
+        let mut file_groups: HashMap<i32, Vec<PartitionLocation>> = HashMap::new();
+        for (partition_id, file_group) in &response.file_groups {
+            let locations: Vec<PartitionLocation> = file_group
+                .locations
+                .iter()
+                .map(|pb_loc| self.convert_partition_location(pb_loc))
+                .collect();
+            file_groups.insert(*partition_id, locations);
+        }
 
         Ok(ReducerFileGroupResponse {
             status,
-            file_groups: HashMap::new(),
-            attempts: Vec::new(),
-            partition_ids: HashSet::new(),
+            file_groups,
+            attempts: response.attempts.clone(),
+            partition_ids: response.partition_ids.iter().cloned().collect(),
         })
     }
 
@@ -604,10 +501,9 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             partition_info: pb_partition_infos,
         };
 
-        // Message type for Revive
-        const REVIVE: i32 = 4;
-
-        let response: PbChangeLocationResponse = self.send_rpc(REVIVE, &request).await?;
+        let response: PbChangeLocationResponse = self
+            .send_rpc(TransportMessageType::ChangeLocation, &request)
+            .await?;
 
         // PbChangeLocationResponse doesn't have a status field
         // We infer success if we got partition_info back
@@ -653,10 +549,9 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             old_partition: Some(self.convert_to_pb_location(old_partition)),
         };
 
-        // Message type for PartitionSplit
-        const PARTITION_SPLIT: i32 = 47;
-
-        let response: PbChangeLocationResponse = self.send_rpc(PARTITION_SPLIT, &request).await?;
+        let response: PbChangeLocationResponse = self
+            .send_rpc(TransportMessageType::PartitionSplit, &request)
+            .await?;
 
         // Get new location from response
         // PbChangeLocationResponse doesn't have a status field
@@ -682,36 +577,19 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             app_shuffle_id, app_shuffle_identifier, is_writer
         );
 
-        // Message type for GetShuffleId
-        const GET_SHUFFLE_ID: i32 = 9;
+        // Create protobuf request
+        use crate::protocol::generated::PbGetShuffleId;
+        let request = PbGetShuffleId {
+            app_shuffle_id,
+            app_shuffle_identifier: app_shuffle_identifier.to_string(),
+            is_shuffle_writer: is_writer,
+        };
 
-        // Create request
-        let mut buf = BytesMut::new();
-        buf.put_i32(app_shuffle_id);
-        let id_bytes = app_shuffle_identifier.as_bytes();
-        buf.put_i32(id_bytes.len() as i32);
-        buf.put_slice(id_bytes);
-        buf.put_u8(if is_writer { 1 } else { 0 });
+        let response: crate::protocol::generated::PbGetShuffleIdResponse = self
+            .send_rpc(TransportMessageType::GetShuffleId, &request)
+            .await?;
 
-        let conn = self.get_connection().await?;
-
-        let payload = buf.freeze();
-        let mut msg = BytesMut::with_capacity(8 + payload.len());
-        msg.put_i32(GET_SHUFFLE_ID);
-        msg.put_i32(payload.len() as i32);
-        msg.put_slice(&payload);
-
-        let response = conn.send_rpc(msg.freeze(), self.rpc_timeout).await?;
-
-        // Parse shuffle ID from response
-        if response.body.len() >= 16 {
-            let shuffle_id = i32::from_be_bytes(response.body[12..16].try_into().unwrap());
-            Ok(shuffle_id)
-        } else {
-            Err(CelebornError::Protocol(
-                "Invalid GetShuffleId response".to_string(),
-            ))
-        }
+        Ok(response.shuffle_id)
     }
 
     async fn report_shuffle_fetch_failure(
@@ -725,30 +603,19 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             app_shuffle_id, shuffle_id, failure_type
         );
 
-        // Message type for ReportShuffleFetchFailure
-        const REPORT_SHUFFLE_FETCH_FAILURE: i32 = 10;
+        // Create protobuf request
+        use crate::protocol::generated::PbReportShuffleFetchFailure;
+        let request = PbReportShuffleFetchFailure {
+            app_shuffle_id,
+            shuffle_id,
+            failure_type,
+        };
 
-        let mut buf = BytesMut::new();
-        buf.put_i32(app_shuffle_id);
-        buf.put_i32(shuffle_id);
-        buf.put_i32(failure_type);
+        let response: crate::protocol::generated::PbReportShuffleFetchFailureResponse = self
+            .send_rpc(TransportMessageType::ReportShuffleFetchFailure, &request)
+            .await?;
 
-        let conn = self.get_connection().await?;
-
-        let payload = buf.freeze();
-        let mut msg = BytesMut::with_capacity(8 + payload.len());
-        msg.put_i32(REPORT_SHUFFLE_FETCH_FAILURE);
-        msg.put_i32(payload.len() as i32);
-        msg.put_slice(&payload);
-
-        let response = conn.send_rpc(msg.freeze(), self.rpc_timeout).await?;
-
-        // Parse success flag from response
-        if response.body.len() >= 13 {
-            Ok(response.body[12] != 0)
-        } else {
-            Ok(false)
-        }
+        Ok(response.success)
     }
 }
 
