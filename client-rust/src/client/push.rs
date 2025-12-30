@@ -411,7 +411,7 @@ impl DataPusher {
                     let cause = match &e {
                         CelebornError::Connection(_) => StatusCode::PushDataCreateConnectionFailPrimary,
                         CelebornError::Timeout(_) => StatusCode::PushDataTimeoutPrimary,
-                        _ => StatusCode::PushDataFailPrimary,
+                        _ => StatusCode::PushDataWriteFailPrimary,
                     };
 
                     match revive_manager

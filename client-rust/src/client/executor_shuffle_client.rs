@@ -217,6 +217,8 @@ impl ExecutorShuffleClient {
     /// Register a shuffle.
     ///
     /// This sends a RegisterShuffle RPC to the Driver's LifecycleManager.
+    /// If the shuffle is already registered (by Java LifecycleManager), it will
+    /// fetch the partition locations from the LifecycleManager instead.
     pub async fn register_shuffle(
         &self,
         shuffle_id: i32,
@@ -239,19 +241,33 @@ impl ExecutorShuffleClient {
             .register_shuffle(shuffle_id, num_mappers, num_partitions)
             .await?;
 
-        if !response.status.is_success() {
-            return Err(CelebornError::ServerError {
-                status: response.status,
-                message: format!("Failed to register shuffle {}", shuffle_id),
-            });
-        }
+        info!(
+            "Received register_shuffle response for shuffle {}: status={:?}, partition_locations_count={}",
+            shuffle_id, response.status, response.partition_locations.len()
+        );
 
         // Store shuffle state
         let state = Arc::new(ShuffleState::new(num_mappers, num_partitions));
 
-        // Store partition locations
-        for (partition_id, locations) in response.partition_locations {
-            state.partition_locations.insert(partition_id, locations);
+        if response.status.is_success() || response.status == StatusCode::ShuffleAlreadyRegistered {
+            // Store partition locations from register response
+            // Note: When shuffle is already registered, Java LifecycleManager returns SUCCESS
+            // with partition locations, not ShuffleAlreadyRegistered
+            for (partition_id, locations) in response.partition_locations {
+                state.partition_locations.insert(partition_id, locations);
+            }
+            
+            if response.status == StatusCode::ShuffleAlreadyRegistered {
+                info!(
+                    "Shuffle {} already registered, using partition locations from response",
+                    shuffle_id
+                );
+            }
+        } else {
+            return Err(CelebornError::ServerError {
+                status: response.status,
+                message: format!("Failed to register shuffle {}", shuffle_id),
+            });
         }
 
         state.registered.store(true, Ordering::Release);
@@ -304,6 +320,7 @@ impl ExecutorShuffleClient {
         let compressed_data = self.compress_data(data)?;
 
         // Build body with batch header: mapId (4) + attemptId (4) + batchId (4) + compressedTotalSize (4) + data
+        // Note: Use little-endian to match Java client's Platform.putInt which uses native (little) endian on x86/x64
         let batch_id = self.next_batch_id(shuffle_id, partition_id);
         let compressed_size = compressed_data.len() as i32;
 
@@ -314,6 +331,18 @@ impl ExecutorShuffleClient {
         body_with_header.put_i32_le(compressed_size);
         body_with_header.put_slice(&compressed_data);
         let body_bytes = body_with_header.freeze();
+        
+        // Debug: write to file for debugging
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/celeborn_rust_debug.log")
+        {
+            let _ = writeln!(file, "[CELEBORN-RUST] push_data: map_id={}, attempt_id={}, batch_id={}, compressed_size={}",
+                map_id, attempt_id, batch_id, compressed_size);
+            let _ = writeln!(file, "[CELEBORN-RUST] Batch header (first 16 bytes): {:02x?}", &body_bytes[..16]);
+        }
 
         // Send push data to worker
         self.send_push_data(&shuffle_key, &partition_unique_id, location, body_bytes)

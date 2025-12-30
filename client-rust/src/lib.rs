@@ -90,7 +90,7 @@ pub mod protocol;
 
 // Re-exports for convenience - Single-process architecture
 pub use client::{CelebornClient, ShuffleClient};
-pub use config::CelebornConfig;
+pub use config::{CelebornConfig, CompressionCodec};
 pub use error::{CelebornError, Result};
 pub use protocol::PartitionLocation;
 

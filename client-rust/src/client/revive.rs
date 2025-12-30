@@ -174,8 +174,8 @@ impl ReviveManager {
 
         match cause {
             StatusCode::PushDataFailNonCriticalCause
-            | StatusCode::PushDataFailPrimary
-            | StatusCode::PushDataFailReplica
+            | StatusCode::PushDataWriteFailPrimary
+            | StatusCode::PushDataWriteFailReplica
             | StatusCode::PushDataCreateConnectionFailPrimary
             | StatusCode::PushDataCreateConnectionFailReplica
             | StatusCode::PushDataConnectionExceptionPrimary
@@ -484,12 +484,12 @@ mod tests {
             0,
             0,
             None,
-            StatusCode::PushDataFailPrimary,
+            StatusCode::PushDataWriteFailPrimary,
         );
         
         assert_eq!(req.shuffle_id, 1);
         assert_eq!(req.partition_id, 0);
-        assert_eq!(req.cause, StatusCode::PushDataFailPrimary);
+        assert_eq!(req.cause, StatusCode::PushDataWriteFailPrimary);
         assert_eq!(req.get_status(), StatusCode::Unknown);
     }
 
@@ -497,7 +497,7 @@ mod tests {
     fn test_revive_request_status() {
         let req = ReviveRequest::new(
             1, 0, 0, 0, 0, None,
-            StatusCode::PushDataFailPrimary,
+            StatusCode::PushDataWriteFailPrimary,
         );
         
         req.set_status(StatusCode::Success);

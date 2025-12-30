@@ -386,7 +386,13 @@ impl LifecycleManagerClient for NettyLifecycleManagerClient {
             .send_rpc(TransportMessageType::RegisterShuffle, &request)
             .await?;
 
+        eprintln!(
+            "[CELEBORN-DEBUG] Received PbRegisterShuffleResponse: status={}, partition_locations_count={}",
+            response.status, response.partition_locations.len()
+        );
+
         let status = StatusCode::from(response.status);
+        eprintln!("[CELEBORN-DEBUG] Converted status: {:?}", status);
 
         // Convert partition locations
         let mut partition_locations: HashMap<i32, Vec<PartitionLocation>> = HashMap::new();
@@ -784,7 +790,7 @@ mod tests {
             partition_id: 0,
             epoch: 1,
             old_partition: None,
-            status: StatusCode::PushDataFailPrimary,
+            status: StatusCode::PushDataWriteFailPrimary,
         };
         assert_eq!(info.partition_id, 0);
         assert_eq!(info.epoch, 1);

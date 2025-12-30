@@ -75,7 +75,7 @@ impl NettyRpcClient {
         Req: ProstMessage,
         Resp: ProstMessage + Default,
     {
-        debug!("Connecting to {} at {}", endpoint_name, addr);
+        eprintln!("[CELEBORN-DEBUG] Connecting to {} at {}", endpoint_name, addr);
 
         // Connect to server
         let mut stream = timeout(self.rpc_timeout, TcpStream::connect(addr))
@@ -246,7 +246,7 @@ impl NettyRpcClient {
                 // RPC_FAILURE
                 let error_msg = self.decode_java_error(&body)?;
                 Err(CelebornError::ServerError {
-                    status: crate::error::StatusCode::RpcFailed,
+                    status: crate::error::StatusCode::RequestFailed,
                     message: error_msg,
                 })
             }
@@ -266,6 +266,7 @@ impl NettyRpcClient {
     where
         Resp: ProstMessage + Default,
     {
+        eprintln!("[CELEBORN-DEBUG] Decoding Java response, data length: {}", data.len());
         if data.len() < 4 {
             return Err(CelebornError::Protocol(
                 "Response too short for Java serialization".to_string(),
@@ -292,7 +293,7 @@ impl NettyRpcClient {
                     // This is an RpcFailure - extract the error message
                     let error_msg = self.extract_rpc_failure_message(data)?;
                     return Err(CelebornError::ServerError {
-                        status: crate::error::StatusCode::RpcFailed,
+                        status: crate::error::StatusCode::RequestFailed,
                         message: error_msg,
                     });
                 }
@@ -301,6 +302,10 @@ impl NettyRpcClient {
 
         // Try to extract TransportMessage payload
         let payload = self.extract_transport_message_payload(data)?;
+        
+        eprintln!("[CELEBORN-DEBUG] Extracted payload length: {}, first 20 bytes: {:02X?}",
+              payload.len(),
+              &payload[..std::cmp::min(20, payload.len())]);
         
         // Decode the protobuf response from the payload
         Resp::decode(payload.as_slice()).map_err(|e| {
@@ -400,7 +405,8 @@ impl NettyRpcClient {
                 if pos + 4 > data.len() {
                     break;
                 }
-                let _message_type = i32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+                let message_type = i32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+                debug!("TransportMessage messageTypeValue: {}", message_type);
                 pos += 4;
                 
                 // Read payload object
