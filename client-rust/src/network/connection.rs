@@ -168,6 +168,51 @@ impl Connection {
         }
     }
 
+    /// Send a PushData frame and wait for response.
+    ///
+    /// PushData messages expect an RpcResponse from the Worker containing a status code.
+    /// The response format is: requestId (8 bytes) + bodySize (4 bytes) + body (status code byte)
+    pub async fn send_push_data(
+        &self,
+        frame: Frame,
+        request_id: i64,
+        timeout_duration: Duration,
+    ) -> Result<Frame> {
+        if !self.active.load(Ordering::Relaxed) {
+            return Err(CelebornError::Connection("Connection is closed".to_string()));
+        }
+
+        // Acquire semaphore permit
+        let _permit = self
+            .in_flight_semaphore
+            .acquire()
+            .await
+            .map_err(|_| CelebornError::Connection("Semaphore closed".to_string()))?;
+
+        // Register pending request
+        let (tx, rx) = oneshot::channel();
+        self.pending_requests.insert(request_id, tx);
+
+        // Send the frame
+        self.sender
+            .send(frame)
+            .await
+            .map_err(|_| CelebornError::Connection("Failed to send push data".to_string()))?;
+
+        // Wait for response with timeout
+        match timeout(timeout_duration, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => {
+                self.pending_requests.remove(&request_id);
+                Err(CelebornError::Connection("Request cancelled".to_string()))
+            }
+            Err(_) => {
+                self.pending_requests.remove(&request_id);
+                Err(CelebornError::Timeout(timeout_duration.as_millis() as u64))
+            }
+        }
+    }
+
     /// Send an RPC request and wait for response.
     pub async fn send_rpc(
         &self,

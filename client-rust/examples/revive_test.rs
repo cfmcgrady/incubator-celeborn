@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             partition_id,
             old_location.as_ref().map(|l| l.epoch).unwrap_or(-1),
             old_location.as_ref(),
-            StatusCode::PushDataFailPrimary,
+            StatusCode::PushDataWriteFailPrimary,
         )
         .await
     {

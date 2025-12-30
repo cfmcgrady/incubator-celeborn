@@ -569,7 +569,7 @@ async fn test_revive_with_different_status_codes() {
     let status_codes = vec![
         StatusCode::PushDataFailNonCriticalCause,
         StatusCode::PushDataTimeoutPrimary,
-        StatusCode::PushDataFailPrimary,
+        StatusCode::PushDataWriteFailPrimary,
     ];
 
     for status_code in status_codes {
@@ -610,7 +610,7 @@ async fn test_revive_request_status() {
         0,
         0,
         None,
-        StatusCode::PushDataFailPrimary,
+        StatusCode::PushDataWriteFailPrimary,
     );
 
     // Initial status should be Unknown

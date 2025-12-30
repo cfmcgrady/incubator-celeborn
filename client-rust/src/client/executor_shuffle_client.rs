@@ -349,7 +349,15 @@ impl ExecutorShuffleClient {
             .await
     }
 
-    /// Send push data to a worker.
+    /// Send push data to a worker and wait for response.
+    ///
+    /// This method sends PushData to the Worker and waits for an RpcResponse.
+    /// The response contains a status code that indicates the result:
+    /// - SUCCESS (0): Data was successfully written
+    /// - SOFT_SPLIT (22): Data was written but partition needs revive
+    /// - HARD_SPLIT (21): Data was not written, need to revive and retry
+    /// - MAP_ENDED (15): Mapper has already ended
+    /// - Other error codes indicate various failure conditions
     async fn send_push_data(
         &self,
         shuffle_key: &str,
@@ -358,6 +366,7 @@ impl ExecutorShuffleClient {
         data: Bytes,
     ) -> Result<()> {
         use std::sync::atomic::AtomicI64;
+        use std::time::Duration;
         static REQUEST_ID_COUNTER: AtomicI64 = AtomicI64::new(1);
         
         let request_id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -384,16 +393,86 @@ impl ExecutorShuffleClient {
         let message_buf = push_data.encode_to_bytes();
         let frame = Frame::with_body(MessageType::PushData, message_buf.freeze(), data);
 
-        conn.send_one_way(frame).await?;
+        // Send and wait for response
+        let timeout_duration = self.config.push_timeout;
+        let response = conn.send_push_data(frame, request_id, timeout_duration).await?;
 
+        // Parse response status code
+        // Response format: RpcResponse with body containing status code (1 byte)
+        let status_code = if !response.body.is_empty() {
+            StatusCode::from(response.body[0] as i32)
+        } else if response.message.len() > 12 {
+            // Status might be in the message body after requestId (8) + bodySize (4)
+            StatusCode::from(response.message[12] as i32)
+        } else {
+            StatusCode::Success
+        };
+
+        // Debug log
         debug!(
-            "Pushed {} bytes to partition {} on {}",
-            data_len,
-            partition_unique_id,
-            location.push_address()
+            "PushData response: request_id={}, status={:?}, partition={}",
+            request_id, status_code, partition_unique_id
         );
 
-        Ok(())
+        // Handle response status
+        match status_code {
+            StatusCode::Success => {
+                debug!(
+                    "Pushed {} bytes to partition {} on {}",
+                    data_len,
+                    partition_unique_id,
+                    location.push_address()
+                );
+                Ok(())
+            }
+            StatusCode::SoftSplit => {
+                // Data was written but partition needs revive
+                // For now, we treat this as success and let the caller handle revive
+                info!(
+                    "PushData returned SOFT_SPLIT for partition {}, data was written",
+                    partition_unique_id
+                );
+                Ok(())
+            }
+            StatusCode::HardSplit => {
+                // Data was NOT written, need to revive and retry
+                // Return an error so the caller can handle revive and retry
+                Err(CelebornError::ServerError {
+                    status: StatusCode::HardSplit,
+                    message: format!(
+                        "HARD_SPLIT for partition {}, need to revive and retry",
+                        partition_unique_id
+                    ),
+                })
+            }
+            StatusCode::MapEnded => {
+                // Mapper has already ended, this is expected for speculative tasks
+                info!(
+                    "PushData returned MAP_ENDED for partition {}, mapper already finished",
+                    partition_unique_id
+                );
+                Ok(())
+            }
+            StatusCode::PushDataSuccessPrimaryCongested | StatusCode::PushDataSuccessReplicaCongested => {
+                // Data was written but worker is congested
+                // For now, treat as success but could implement backpressure
+                debug!(
+                    "PushData returned congested status {:?} for partition {}",
+                    status_code, partition_unique_id
+                );
+                Ok(())
+            }
+            _ => {
+                // Other error status codes
+                Err(CelebornError::ServerError {
+                    status: status_code,
+                    message: format!(
+                        "PushData failed with status {:?} for partition {}",
+                        status_code, partition_unique_id
+                    ),
+                })
+            }
+        }
     }
 
     /// Compress data using the configured codec.
