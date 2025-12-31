@@ -45,8 +45,8 @@ rand = "0.8"
 roaring = "0.10"
 
 # Compression
-lz4_flex = "0.11"
-zstd = "0.13"
+lz4_flex = { version = "0.11", optional = true }
+zstd = { version = "0.13", optional = true }
 
 # Configuration
 config = "0.14"
@@ -63,6 +63,6 @@ name = "push_data"
 harness = false
 
 [features]
-default = []
-compression-lz4 = []
-compression-zstd = []
+default = ["compression-lz4"]
+compression-lz4 = ["dep:lz4_flex"]
+compression-zstd = ["dep:zstd"]

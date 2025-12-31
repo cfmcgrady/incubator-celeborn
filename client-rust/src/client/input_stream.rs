@@ -1166,32 +1166,46 @@ impl CelebornInputStream {
         match self.config.compression_codec {
             CompressionCodec::None => Ok(data.to_vec()),
             CompressionCodec::Lz4 => {
-                // LZ4 frame format: first 4 bytes are original length
-                if data.len() < 4 {
-                    return Err(CelebornError::DecompressionFailed(
-                        "LZ4 data too short".to_string(),
-                    ));
+                #[cfg(feature = "compression-lz4")]
+                {
+                    // LZ4 frame format: first 4 bytes are original length
+                    if data.len() < 4 {
+                        return Err(CelebornError::DecompressionFailed(
+                            "LZ4 data too short".to_string(),
+                        ));
+                    }
+    
+                    let original_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                    let compressed_data = &data[4..];
+    
+                    let mut decompressed = vec![0u8; original_len];
+                    match lz4_flex::decompress_into(compressed_data, &mut decompressed) {
+                        Ok(_) => Ok(decompressed),
+                        Err(e) => Err(CelebornError::DecompressionFailed(format!(
+                            "LZ4 decompression failed: {}",
+                            e
+                        ))),
+                    }
                 }
-
-                let original_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                let compressed_data = &data[4..];
-
-                let mut decompressed = vec![0u8; original_len];
-                match lz4_flex::decompress_into(compressed_data, &mut decompressed) {
-                    Ok(_) => Ok(decompressed),
-                    Err(e) => Err(CelebornError::DecompressionFailed(format!(
-                        "LZ4 decompression failed: {}",
-                        e
-                    ))),
+                #[cfg(not(feature = "compression-lz4"))]
+                {
+                    Ok(data.to_vec())
                 }
             }
             CompressionCodec::Zstd => {
-                match zstd::decode_all(data) {
-                    Ok(decompressed) => Ok(decompressed),
-                    Err(e) => Err(CelebornError::DecompressionFailed(format!(
-                        "ZSTD decompression failed: {}",
-                        e
-                    ))),
+                #[cfg(feature = "compression-zstd")]
+                {
+                    match zstd::decode_all(data) {
+                        Ok(decompressed) => Ok(decompressed),
+                        Err(e) => Err(CelebornError::DecompressionFailed(format!(
+                            "ZSTD decompression failed: {}",
+                            e
+                        ))),
+                    }
+                }
+                #[cfg(not(feature = "compression-zstd"))]
+                {
+                    Ok(data.to_vec())
                 }
             }
         }
@@ -1766,6 +1780,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression-lz4")]
     fn test_decompress_lz4() {
         // Create a stream with LZ4 compression
         let mut stream = CelebornInputStream::empty();
@@ -1785,6 +1800,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression-lz4")]
     fn test_decompress_lz4_empty() {
         // Create a stream with LZ4 compression
         let mut stream = CelebornInputStream::empty();
@@ -1798,6 +1814,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression-zstd")]
     fn test_decompress_zstd() {
         // Create a stream with ZSTD compression
         let mut stream = CelebornInputStream::empty();
@@ -1817,6 +1834,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compression-zstd")]
     fn test_decompress_zstd_invalid() {
         // Create a stream with ZSTD compression
         let mut stream = CelebornInputStream::empty();

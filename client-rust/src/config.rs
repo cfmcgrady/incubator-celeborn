@@ -37,6 +37,17 @@ impl Default for CompressionCodec {
     }
 }
 
+impl CompressionCodec {
+    /// Check if the compression codec is enabled via feature flags.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            CompressionCodec::None => true,
+            CompressionCodec::Lz4 => cfg!(feature = "compression-lz4"),
+            CompressionCodec::Zstd => cfg!(feature = "compression-zstd"),
+        }
+    }
+}
+
 /// Partition split mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,6 +280,13 @@ impl CelebornConfig {
             }
         }
 
+        if !self.compression_codec.is_enabled() {
+            return Err(CelebornError::Config(format!(
+                "Compression codec {:?} is selected but the corresponding feature is not enabled",
+                self.compression_codec
+            )));
+        }
+
         Ok(())
     }
 }
@@ -456,5 +474,24 @@ mod tests {
             .master_endpoints(vec!["localhost".to_string()])
             .build();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_compression_feature_check() {
+        // Zstd is not enabled in default features (I'm running this test without features)
+        // Note: When running with --features compression-zstd, this test might need adjustment
+        // but for a plain 'cargo test', it should work.
+        
+        if !cfg!(feature = "compression-zstd") {
+            let result = CelebornConfig::builder()
+                .app_id("test-app")
+                .master_endpoints(vec!["localhost:9097".to_string()])
+                .compression_codec(CompressionCodec::Zstd)
+                .build();
+            
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(err.to_string().contains("corresponding feature is not enabled"));
+        }
     }
 }
