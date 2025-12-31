@@ -87,6 +87,7 @@ pub mod config;
 pub mod error;
 pub mod network;
 pub mod protocol;
+pub mod repartitioner;
 
 // Re-exports for convenience - Single-process architecture
 pub use client::{CelebornClient, ShuffleClient};
@@ -98,4 +99,10 @@ pub use protocol::PartitionLocation;
 pub use client::{
     ExecutorShuffleClient, LifecycleManagerClient, NettyLifecycleManagerClient,
     LocalLifecycleManagerClient,
+};
+
+// Re-exports for repartitioner (used by DataFusion, Comet, etc.)
+pub use repartitioner::{
+    ClientManager, HashRepartitioner, RepartitionerConfig, ShuffleRepartitioner,
+    ScratchSpace, map_partition_ids_to_starts_and_indices, pmod,
 };

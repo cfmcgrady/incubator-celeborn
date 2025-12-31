@@ -22,12 +22,14 @@ pub mod message;
 pub mod transport;
 pub mod java_serialization;
 pub mod generated;
+pub mod batch_header;
 
 // Include generated protobuf code
 pub use generated::*;
 
 pub use message::*;
 pub use transport::*;
+pub use batch_header::{BatchHeader, BatchIterator, AttemptFilteredBatchIterator};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
