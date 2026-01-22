@@ -112,6 +112,10 @@ public class SparkUtils {
     for (Tuple2<String, String> kv : conf.getAll()) {
       if (kv._1.startsWith("spark.celeborn.")) {
         tmpCelebornConf.set(kv._1.substring("spark.".length()), kv._2);
+      } else if (kv._1.equals("spark.executor.memory")) {
+        tmpCelebornConf.set("spark.executor.memory", kv._2);
+      } else if (kv._1.equals("spark.executor.cores")) {
+        tmpCelebornConf.set("spark.executor.cores", kv._2);
       }
     }
     return tmpCelebornConf;
