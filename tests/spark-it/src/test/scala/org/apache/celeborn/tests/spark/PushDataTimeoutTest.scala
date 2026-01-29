@@ -68,6 +68,7 @@ class PushDataTimeoutTest extends AnyFunSuite
         .set(s"spark.${CelebornConf.CLIENT_EXCLUDE_PEER_WORKER_ON_FAILURE_ENABLED.key}", "false")
         // make sure PushDataHandler.handlePushData be triggered
         .set(s"spark.${CelebornConf.CLIENT_PUSH_BUFFER_MAX_SIZE.key}", "5")
+        .set(s"spark.${CelebornConf.CLIENT_USE_ADAPTIVE_PARAMS.key}", "false")
 
       val sparkSession = SparkSession.builder().config(sparkConf).getOrCreate()
       val sqlResult = runsql(sparkSession)

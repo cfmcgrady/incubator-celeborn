@@ -858,7 +858,27 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   // //////////////////////////////////////////////////////
   def clientPushReplicateEnabled: Boolean = get(CLIENT_PUSH_REPLICATE_ENABLED)
   def clientPushBufferInitialSize: Int = get(CLIENT_PUSH_BUFFER_INITIAL_SIZE).toInt
-  def clientPushBufferMaxSize: Int = get(CLIENT_PUSH_BUFFER_MAX_SIZE).toInt
+  // The default values keep consistent with Spark's default value
+  private[celeborn] lazy val executorMemory: Int =
+    Utils.memoryStringToMb(get("spark.executor.memory", "1024m"))
+  private[celeborn] lazy val executorCores: Int =
+    Math.max(1, get("spark.executor.cores", "1").toInt)
+  private[celeborn] lazy val executorMemoryPerCore: Double = executorMemory.toDouble / executorCores
+  private lazy val adaptiveRule: AdaptiveParamRule = {
+    val rule = matchAdaptiveParamRule(executorMemory, executorMemoryPerCore)
+    logInfo(s"Matched adaptive param rule:" +
+      s"${CLIENT_PUSH_SORT_MEMORY_THRESHOLD.key}=${rule.sortMemoryThreshold}, " +
+      s"${CLIENT_PUSH_BUFFER_MAX_SIZE.key}=${rule.bufferMaxSize} " +
+      s"(executorMemory=${executorMemory}MB, memoryPerCore=${executorMemoryPerCore.toInt}MB)")
+    rule
+  }
+  def clientPushBufferMaxSize: Int = {
+    if (get(CLIENT_USE_ADAPTIVE_PARAMS)) {
+      Utils.byteStringAsBytes(adaptiveRule.bufferMaxSize).toInt
+    } else {
+      get(CLIENT_PUSH_BUFFER_MAX_SIZE).toInt
+    }
+  }
   def clientPushQueueCapacity: Int = get(CLIENT_PUSH_QUEUE_CAPACITY)
   def clientPushExcludeWorkerOnFailureEnabled: Boolean =
     get(CLIENT_PUSH_EXCLUDE_WORKER_ON_FAILURE_ENABLED)
@@ -867,7 +887,13 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def clientPushMaxReviveTimes: Int = get(CLIENT_PUSH_MAX_REVIVE_TIMES)
   def clientPushReviveInterval: Long = get(CLIENT_PUSH_REVIVE_INTERVAL)
   def clientPushReviveBatchSize: Int = get(CLIENT_PUSH_REVIVE_BATCHSIZE)
-  def clientPushSortMemoryThreshold: Long = get(CLIENT_PUSH_SORT_MEMORY_THRESHOLD)
+  def clientPushSortMemoryThreshold: Long = {
+    if (get(CLIENT_USE_ADAPTIVE_PARAMS)) {
+      Utils.byteStringAsBytes(adaptiveRule.sortMemoryThreshold)
+    } else {
+      get(CLIENT_PUSH_SORT_MEMORY_THRESHOLD)
+    }
+  }
   def clientPushSortRandomizePartitionIdEnabled: Boolean =
     get(CLIENT_PUSH_SORT_RANDOMIZE_PARTITION_ENABLED)
   def clientPushRetryThreads: Int = get(CLIENT_PUSH_RETRY_THREADS)
@@ -1346,6 +1372,39 @@ object CelebornConf extends Logging {
 
       configsWithAlternatives.remove(entry.key)
     }
+
+  private case class AdaptiveParamRule(
+      maxExecutorMemory: String,
+      maxMemoryPerCore: String,
+      sortMemoryThreshold: String,
+      bufferMaxSize: String) {
+    val maxExecutorMemoryMB: Long = Utils.memoryStringToMb(maxExecutorMemory)
+    val maxMemoryPerCoreMB: Long = Utils.memoryStringToMb(maxMemoryPerCore)
+  }
+
+  private val adaptiveParamRules: Seq[AdaptiveParamRule] = Seq(
+    AdaptiveParamRule("1g", "256m", "16m", "32k"),
+    AdaptiveParamRule("2g", "512m", "64m", "64k"),
+    AdaptiveParamRule("4g", "1g", "128m", "64k"),
+    AdaptiveParamRule("8g", "2g", "128m", "64k"),
+    AdaptiveParamRule("12g", "3g", "512m", "128k"),
+    AdaptiveParamRule(s"${Int.MaxValue}m", s"${Int.MaxValue}m", "1g", "1m"))
+
+  private def matchAdaptiveParamRule(
+      executorMemory: Int,
+      executorMemoryPerCore: Double): AdaptiveParamRule = {
+    val execMemoryMB = executorMemory
+    val memoryPerCoreMB = executorMemoryPerCore
+
+    adaptiveParamRules.find { rule =>
+      execMemoryMB <= rule.maxExecutorMemoryMB ||
+      memoryPerCoreMB <= rule.maxMemoryPerCoreMB
+    }.getOrElse {
+      logWarning(s"No adaptive param rule matched for executorMemory=$execMemoryMB MB, " +
+        s"memoryPerCore=$memoryPerCoreMB MB, using default rule")
+      adaptiveParamRules.last
+    }
+  }
 
   private[celeborn] def getConfigEntry(key: String): ConfigEntry[_] = {
     confEntries.get(key)
@@ -4658,4 +4717,12 @@ object CelebornConf extends Logging {
       .version("0.6.0")
       .timeConf(TimeUnit.MILLISECONDS)
       .createWithDefaultString("60s")
+
+  val CLIENT_USE_ADAPTIVE_PARAMS: ConfigEntry[Boolean] =
+    buildConf("celeborn.client.spark.useAdaptiveParams")
+      .categories("client")
+      .doc("When set to true, will use adaptive parameters.")
+      .version("0.4.2.5")
+      .booleanConf
+      .createWithDefault(false)
 }
