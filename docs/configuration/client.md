@@ -18,8 +18,8 @@ license: |
 
 <!--begin-include-->
 | Key | Default | Description | Since | Deprecated |
-| --- | ------- | ----------- | ----- | ---------- |
-| celeborn.client.adaptive.optimizeSkewedPartitionRead.enabled | false | If this is true, Celeborn will adaptively split skewed partitions instead of reading them by Spark map range. Please note that this feature requires the `Celeborn-Optimize-Skew-Partitions-spark3_3.patch`.  | 0.4.1 |  | 
+| --- | ----- | ----- | ----- | ---------- |
+| celeborn.client.adaptive.optimizeSkewedPartitionRead.enabled | false | If this is true, Celeborn will adaptively split skewed partitions instead of reading them by Spark map range. Please note that this feature requires the `Celeborn-Optimize-Skew-Partitions-spark3_3.patch`. | 0.4.1 |  | 
 | celeborn.client.application.heartbeatInterval | 10s | Interval for client to send heartbeat message to master. | 0.3.0 | celeborn.application.heartbeatInterval | 
 | celeborn.client.application.unregister.enabled | true | When true, Celeborn client will inform celeborn master the application is already shutdown during client exit, this allows the cluster to release resources immediately, resulting in resource savings. | 0.3.2 |  | 
 | celeborn.client.closeIdleConnections | true | Whether client will close idle connections. | 0.3.0 |  | 
@@ -43,7 +43,7 @@ license: |
 | celeborn.client.flink.resultPartition.minMemory | 8m | Min memory reserved for a result partition. | 0.3.0 | remote-shuffle.job.min.memory-per-partition | 
 | celeborn.client.flink.resultPartition.supportFloatingBuffer | true | Whether to support floating buffer for result partitions. | 0.3.0 | remote-shuffle.job.support-floating-buffer-per-output-gate | 
 | celeborn.client.mr.pushData.max | 32m | Max size for a push data sent from mr client. | 0.4.0 |  | 
-| celeborn.client.push.buffer.initial.size | 8k |  | 0.3.0 | celeborn.push.buffer.initial.size | 
+| celeborn.client.push.buffer.initial.size | 8k | | 0.3.0 | celeborn.push.buffer.initial.size | 
 | celeborn.client.push.buffer.max.size | 64k | Max size of reducer partition buffer memory for shuffle hash writer. The pushed data will be buffered in memory before sending to Celeborn worker. For performance consideration keep this buffer size higher than 32K. Example: If reducer amount is 2000, buffer size is 64K, then each task will consume up to `64KiB * 2000 = 125MiB` heap memory. | 0.3.0 | celeborn.push.buffer.max.size | 
 | celeborn.client.push.excludeWorkerOnFailure.enabled | false | Whether to enable shuffle client-side push exclude workers on failures. | 0.3.0 |  | 
 | celeborn.client.push.limit.inFlight.sleepInterval | 50ms | Sleep interval when check netty in-flight requests to be done. | 0.3.0 | celeborn.push.limit.inFlight.sleepInterval | 
@@ -87,6 +87,7 @@ license: |
 | celeborn.client.rpc.reserveSlots.askTimeout | &lt;value of celeborn.rpc.askTimeout&gt; | Timeout for LifecycleManager request reserve slots. | 0.3.0 |  | 
 | celeborn.client.rpc.shared.threads | 16 | Number of shared rpc threads in LifecycleManager. | 0.3.2 |  | 
 | celeborn.client.shuffle.batchHandleChangePartition.interval | 100ms | Interval for LifecycleManager to schedule handling change partition requests in batch. | 0.3.0 | celeborn.shuffle.batchHandleChangePartition.interval | 
+| celeborn.client.shuffle.batchHandleChangePartition.partitionBuckets | 256 | Max number of change partition requests which can be concurrently processed. | 0.5.0 |  | 
 | celeborn.client.shuffle.batchHandleChangePartition.threads | 8 | Threads number for LifecycleManager to handle change partition request in batch. | 0.3.0 | celeborn.shuffle.batchHandleChangePartition.threads | 
 | celeborn.client.shuffle.batchHandleCommitPartition.interval | 5s | Interval for LifecycleManager to schedule handling commit partition requests in batch. | 0.3.0 | celeborn.shuffle.batchHandleCommitPartition.interval | 
 | celeborn.client.shuffle.batchHandleCommitPartition.threads | 8 | Threads number for LifecycleManager to handle commit partition request in batch. | 0.3.0 | celeborn.shuffle.batchHandleCommitPartition.threads | 
