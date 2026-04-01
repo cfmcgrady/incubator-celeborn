@@ -24,6 +24,53 @@ fi
 
 . "${CELEBORN_HOME}/sbin/load-celeborn-env.sh"
 
+# Read worker port configurations
+CELEBORN_DEFAULTS_CONF="${CELEBORN_CONF_DIR}/celeborn-defaults.conf"
+
+echo "Reading worker port configurations from: $CELEBORN_DEFAULTS_CONF"
+
+# Define worker port configurations to check
+WORKER_PORT_CONFIGS=(
+  "celeborn.worker.fetch.port"
+  "celeborn.worker.rpc.port"
+  "celeborn.worker.push.port"
+  "celeborn.worker.replicate.port"
+  "celeborn.metrics.worker.prometheus.port"
+)
+
+# Check each worker port configuration
+FAILED_PORTS=""
+for port_config_pair in "${WORKER_PORT_CONFIGS[@]}"; do
+  port_config="${port_config_pair}"
+  port_value=$(read_config_value "$CELEBORN_DEFAULTS_CONF" "$port_config")
+  
+  # Check if read_config_value succeeded
+  if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to read configuration for $port_config"
+    exit 1
+  fi
+  
+  echo "Checking $port_config: $port_value"
+  # Test port availability
+  if ! test_port_availability "$port_value"; then
+    echo "ERROR: $port_value is not available"
+    FAILED_PORTS="$FAILED_PORTS $port_config:$port_value"
+  fi
+done
+
+# Check if any ports failed
+if [ -n "$FAILED_PORTS" ]; then
+  echo ""
+  echo "ERROR: The following worker ports are not available:"
+  for failed_port in $FAILED_PORTS; do
+    echo "  - ${failed_port%:*}: ${failed_port#*:}"
+  done
+  echo "Worker Start Fail, Please check the worker port configuration"
+  exit 1
+fi
+
+echo "All worker ports are available!"
+
 if [ "$CELEBORN_WORKER_MEMORY" = "" ]; then
   CELEBORN_WORKER_MEMORY="1g"
 fi
