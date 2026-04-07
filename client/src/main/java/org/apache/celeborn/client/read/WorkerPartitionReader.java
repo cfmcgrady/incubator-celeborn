@@ -120,18 +120,37 @@ public class WorkerPartitionReader implements PartitionReader {
       throw ie;
     }
 
+    PbOpenStream pbOpenStream =
+        PbOpenStream.newBuilder()
+            .setShuffleKey(shuffleKey)
+            .setFileName(location.getFileName())
+            .setStartIndex(startMapIndex)
+            .setEndIndex(endMapIndex)
+            .build();
     TransportMessage openStreamMsg =
-        new TransportMessage(
-            MessageType.OPEN_STREAM,
-            PbOpenStream.newBuilder()
-                .setShuffleKey(shuffleKey)
-                .setFileName(location.getFileName())
-                .setStartIndex(startMapIndex)
-                .setEndIndex(endMapIndex)
-                .build()
-                .toByteArray());
+        new TransportMessage(MessageType.OPEN_STREAM, pbOpenStream.toByteArray());
+    logger.info(
+        "OpenStream request sent to {}:{}, shuffleKey: {}, fileName: {}, startMapIndex: {}, endMapIndex: {}, timeoutMs: {}",
+        location.getHost(),
+        location.getFetchPort(),
+        shuffleKey,
+        location.getFileName(),
+        startMapIndex,
+        endMapIndex,
+        fetchTimeoutMs);
+    long openStreamStartTime = System.nanoTime();
     ByteBuffer response = client.sendRpcSync(openStreamMsg.toByteBuffer(), fetchTimeoutMs);
+    long openStreamDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - openStreamStartTime);
     streamHandler = TransportMessage.fromByteBuffer(response).getParsedPayload();
+    logger.info(
+        "OpenStream response from {}:{}, shuffleKey: {}, fileName: {}, streamId: {}, numChunks: {}, duration: {}ms",
+        location.getHost(),
+        location.getFetchPort(),
+        shuffleKey,
+        location.getFileName(),
+        streamHandler.getStreamId(),
+        streamHandler.getNumChunks(),
+        openStreamDurationMs);
     this.startChunkIndex = startChunkIndex == -1 ? 0 : startChunkIndex;
     this.endChunkIndex =
         endChunkIndex == -1
