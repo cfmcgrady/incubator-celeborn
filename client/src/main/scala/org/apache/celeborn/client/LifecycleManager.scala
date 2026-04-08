@@ -208,7 +208,6 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   // method at the end of the construction of the class to perform the initialization operations.
   private def initialize(): Unit = {
     // noinspection ConvertExpressionToSAM
-    logInfo("[XinXi] Starting init LifecycleManager")
     commitManager.start()
     heartbeater.start()
     changePartitionManager.start()
