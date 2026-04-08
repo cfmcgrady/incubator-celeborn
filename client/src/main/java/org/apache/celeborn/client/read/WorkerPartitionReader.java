@@ -129,28 +129,37 @@ public class WorkerPartitionReader implements PartitionReader {
             .build();
     TransportMessage openStreamMsg =
         new TransportMessage(MessageType.OPEN_STREAM, pbOpenStream.toByteArray());
-    logger.info(
-        "OpenStream request sent to {}:{}, shuffleKey: {}, fileName: {}, startMapIndex: {}, endMapIndex: {}, timeoutMs: {}",
-        location.getHost(),
-        location.getFetchPort(),
-        shuffleKey,
-        location.getFileName(),
-        startMapIndex,
-        endMapIndex,
-        fetchTimeoutMs);
     long openStreamStartTime = System.nanoTime();
     ByteBuffer response = client.sendRpcSync(openStreamMsg.toByteBuffer(), fetchTimeoutMs);
-    long openStreamDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - openStreamStartTime);
+    long openStreamDurationNs = System.nanoTime() - openStreamStartTime;
     streamHandler = TransportMessage.fromByteBuffer(response).getParsedPayload();
-    logger.info(
-        "OpenStream response from {}:{}, shuffleKey: {}, fileName: {}, streamId: {}, numChunks: {}, duration: {}ms",
-        location.getHost(),
-        location.getFetchPort(),
-        shuffleKey,
-        location.getFileName(),
-        streamHandler.getStreamId(),
-        streamHandler.getNumChunks(),
-        openStreamDurationMs);
+    if (openStreamDurationNs >= conf.rpcSlowThresholdNS()) {
+      logger.warn(
+          "Slow OpenStream to {}:{}, shuffleKey: {}, fileName: {}, startMapIndex: {}, endMapIndex: {},"
+              + " streamId: {}, numChunks: {}, duration: {}ms",
+          location.getHost(),
+          location.getFetchPort(),
+          shuffleKey,
+          location.getFileName(),
+          startMapIndex,
+          endMapIndex,
+          streamHandler.getStreamId(),
+          streamHandler.getNumChunks(),
+          TimeUnit.NANOSECONDS.toMillis(openStreamDurationNs));
+    } else if (logger.isDebugEnabled()) {
+      logger.debug(
+          "OpenStream to {}:{}, shuffleKey: {}, fileName: {}, startMapIndex: {}, endMapIndex: {},"
+              + " streamId: {}, numChunks: {}, duration: {}ms",
+          location.getHost(),
+          location.getFetchPort(),
+          shuffleKey,
+          location.getFileName(),
+          startMapIndex,
+          endMapIndex,
+          streamHandler.getStreamId(),
+          streamHandler.getNumChunks(),
+          TimeUnit.NANOSECONDS.toMillis(openStreamDurationNs));
+    }
     this.startChunkIndex = startChunkIndex == -1 ? 0 : startChunkIndex;
     this.endChunkIndex =
         endChunkIndex == -1
