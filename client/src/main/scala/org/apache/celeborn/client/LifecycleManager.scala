@@ -74,6 +74,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
 
   private val shuffleExpiredCheckIntervalMs = conf.shuffleExpiredCheckIntervalMs
   private val slotsAssignMaxWorkers = conf.clientSlotAssignMaxWorkers
+  private val clientSlotAssignExtraSlots = conf.clientSlotAssignExtraSlots
   private val pushReplicateEnabled = conf.clientPushReplicateEnabled
   private val pushRackAwareEnabled = conf.clientReserveSlotsRackAwareEnabled
   private val partitionSplitThreshold = conf.shufflePartitionSplitThreshold
@@ -580,8 +581,13 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
     }
 
     // First, request to get allocated slots from Primary
-    val ids = new util.ArrayList[Integer](numPartitions)
-    (0 until numPartitions).foreach(idx => ids.add(Integer.valueOf(idx)))
+    val totalPartitions = numPartitions + clientSlotAssignExtraSlots
+    val ids = new util.ArrayList[Integer](totalPartitions)
+    var idx = 0
+    while (idx < totalPartitions) {
+      ids.add(Integer.valueOf(idx))
+      idx += 1
+    }
     val res = requestMasterRequestSlotsWithRetry(shuffleId, ids)
 
     res.status match {

@@ -18,8 +18,8 @@ license: |
 
 <!--begin-include-->
 | Key | Default | Description | Since | Deprecated |
-| --- | ----- | ----- | ----- | ---------- |
-| celeborn.client.adaptive.optimizeSkewedPartitionRead.enabled | false | If this is true, Celeborn will adaptively split skewed partitions instead of reading them by Spark map range. Please note that this feature requires the `Celeborn-Optimize-Skew-Partitions-spark3_3.patch`. | 0.4.1 |  | 
+| --- | ------- | ----------- | ----- | ---------- |
+| celeborn.client.adaptive.optimizeSkewedPartitionRead.enabled | false | If this is true, Celeborn will adaptively split skewed partitions instead of reading them by Spark map range. Please note that this feature requires the `Celeborn-Optimize-Skew-Partitions-spark3_3.patch`.  | 0.4.1 |  | 
 | celeborn.client.application.heartbeatInterval | 10s | Interval for client to send heartbeat message to master. | 0.3.0 | celeborn.application.heartbeatInterval | 
 | celeborn.client.application.unregister.enabled | true | When true, Celeborn client will inform celeborn master the application is already shutdown during client exit, this allows the cluster to release resources immediately, resulting in resource savings. | 0.3.2 |  | 
 | celeborn.client.closeIdleConnections | true | Whether client will close idle connections. | 0.3.0 |  | 
@@ -43,7 +43,7 @@ license: |
 | celeborn.client.flink.resultPartition.minMemory | 8m | Min memory reserved for a result partition. | 0.3.0 | remote-shuffle.job.min.memory-per-partition | 
 | celeborn.client.flink.resultPartition.supportFloatingBuffer | true | Whether to support floating buffer for result partitions. | 0.3.0 | remote-shuffle.job.support-floating-buffer-per-output-gate | 
 | celeborn.client.mr.pushData.max | 32m | Max size for a push data sent from mr client. | 0.4.0 |  | 
-| celeborn.client.push.buffer.initial.size | 8k | | 0.3.0 | celeborn.push.buffer.initial.size | 
+| celeborn.client.push.buffer.initial.size | 8k |  | 0.3.0 | celeborn.push.buffer.initial.size | 
 | celeborn.client.push.buffer.max.size | 64k | Max size of reducer partition buffer memory for shuffle hash writer. The pushed data will be buffered in memory before sending to Celeborn worker. For performance consideration keep this buffer size higher than 32K. Example: If reducer amount is 2000, buffer size is 64K, then each task will consume up to `64KiB * 2000 = 125MiB` heap memory. | 0.3.0 | celeborn.push.buffer.max.size | 
 | celeborn.client.push.excludeWorkerOnFailure.enabled | false | Whether to enable shuffle client-side push exclude workers on failures. | 0.3.0 |  | 
 | celeborn.client.push.limit.inFlight.sleepInterval | 50ms | Sleep interval when check netty in-flight requests to be done. | 0.3.0 | celeborn.push.limit.inFlight.sleepInterval | 
@@ -87,7 +87,7 @@ license: |
 | celeborn.client.rpc.reserveSlots.askTimeout | &lt;value of celeborn.rpc.askTimeout&gt; | Timeout for LifecycleManager request reserve slots. | 0.3.0 |  | 
 | celeborn.client.rpc.shared.threads | 16 | Number of shared rpc threads in LifecycleManager. | 0.3.2 |  | 
 | celeborn.client.shuffle.batchHandleChangePartition.interval | 100ms | Interval for LifecycleManager to schedule handling change partition requests in batch. | 0.3.0 | celeborn.shuffle.batchHandleChangePartition.interval | 
-| celeborn.client.shuffle.batchHandleChangePartition.partitionBuckets | 256 | Max number of change partition requests which can be concurrently processed. | 0.5.0 |  | 
+| celeborn.client.shuffle.batchHandleChangePartition.partitionBuckets | 256 | Max number of change partition requests which can be concurrently processed  | 0.5.0 |  | 
 | celeborn.client.shuffle.batchHandleChangePartition.threads | 8 | Threads number for LifecycleManager to handle change partition request in batch. | 0.3.0 | celeborn.shuffle.batchHandleChangePartition.threads | 
 | celeborn.client.shuffle.batchHandleCommitPartition.interval | 5s | Interval for LifecycleManager to schedule handling commit partition requests in batch. | 0.3.0 | celeborn.shuffle.batchHandleCommitPartition.interval | 
 | celeborn.client.shuffle.batchHandleCommitPartition.threads | 8 | Threads number for LifecycleManager to handle commit partition request in batch. | 0.3.0 | celeborn.shuffle.batchHandleCommitPartition.threads | 
@@ -104,6 +104,7 @@ license: |
 | celeborn.client.shuffle.partitionSplit.threshold | 1G | Shuffle file size threshold, if file size exceeds this, trigger split. | 0.3.0 | celeborn.shuffle.partitionSplit.threshold | 
 | celeborn.client.shuffle.rangeReadFilter.enabled | false | If a spark application have skewed partition, this value can set to true to improve performance. | 0.2.0 | celeborn.shuffle.rangeReadFilter.enabled | 
 | celeborn.client.shuffle.register.filterExcludedWorker.enabled | false | Whether to filter excluded worker when register shuffle. | 0.4.0 |  | 
+| celeborn.client.slot.assign.extraSlots | 0 | Extra slots number when requesting slots from master on client side. This will increase the number of partitions requested to get more worker slots for revive. | 0.4.2.6 |  | 
 | celeborn.client.slot.assign.maxWorkers | 10000 | Max workers that slots of one shuffle can be allocated on. Will choose the smaller positive one from Master side and Client side, see `celeborn.master.slot.assign.maxWorkers`. | 0.3.1 |  | 
 | celeborn.client.spark.fetch.throwsFetchFailure | false | client throws FetchFailedException instead of CelebornIOException | 0.4.0 |  | 
 | celeborn.client.spark.push.sort.memory.threshold | 64m | When SortBasedPusher use memory over the threshold, will trigger push data. | 0.3.0 | celeborn.push.sortMemory.threshold | 
@@ -112,7 +113,9 @@ license: |
 | celeborn.client.spark.shuffle.forceFallback.enabled | false | Whether force fallback shuffle to Spark's default. This configuration only takes effect when celeborn.client.spark.shuffle.fallback.policy is AUTO. | 0.3.0 | celeborn.shuffle.forceFallback.enabled | 
 | celeborn.client.spark.shuffle.forceFallback.numPartitionsThreshold | 2147483647 | Celeborn will only accept shuffle of partition number lower than this configuration value. This configuration only takes effect when celeborn.client.spark.shuffle.fallback.policy is AUTO. | 0.3.0 | celeborn.shuffle.forceFallback.numPartitionsThreshold | 
 | celeborn.client.spark.shuffle.writer | HASH | Celeborn supports the following kind of shuffle writers. 1. hash: hash-based shuffle writer works fine when shuffle partition count is normal; 2. sort: sort-based shuffle writer works fine when memory pressure is high or shuffle partition count is huge. | 0.3.0 | celeborn.shuffle.writer | 
+| celeborn.client.spark.useAdaptiveParams | false | When set to true, will use adaptive parameters. | 0.4.2.5 |  | 
 | celeborn.master.endpoints | &lt;localhost&gt;:9097 | Endpoints of master nodes for celeborn client to connect, allowed pattern is: `<host1>:<port1>[,<host2>:<port2>]*`, e.g. `clb1:9097,clb2:9098,clb3:9099`. If the port is omitted, 9097 will be used. | 0.2.0 |  | 
+| celeborn.quota.app.client.enabled | true | Whether to enable app-level quota. | 0.4.2.2 |  | 
 | celeborn.storage.availableTypes | HDD | Enabled storages. Available options: MEMORY,HDD,SSD,HDFS. Note: HDD and SSD would be treated as identical. | 0.3.0 | celeborn.storage.activeTypes | 
 | celeborn.storage.hdfs.dir | &lt;undefined&gt; | HDFS base directory for Celeborn to store shuffle data. | 0.2.0 |  | 
 <!--end-include-->

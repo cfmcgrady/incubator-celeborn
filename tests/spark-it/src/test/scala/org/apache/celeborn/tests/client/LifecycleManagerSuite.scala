@@ -19,7 +19,9 @@ package org.apache.celeborn.tests.client
 
 import java.util
 
-import org.apache.celeborn.client.{LifecycleManager, WithShuffleClientSuite}
+import scala.collection.JavaConverters._
+
+import org.apache.celeborn.client.{LifecycleManager, ShuffleClientImpl, WithShuffleClientSuite}
 import org.apache.celeborn.common.CelebornConf
 import org.apache.celeborn.common.protocol.message.StatusCode
 import org.apache.celeborn.service.deploy.MiniClusterFeature
@@ -98,6 +100,57 @@ class LifecycleManagerSuite extends WithShuffleClientSuite with MiniClusterFeatu
       .workerResource.keySet()
     assert(res.size() == workerInfos.size)
     assert(res.contains(workerInfos.keySet.head.workerInfo))
+    lifecycleManager.stop()
+  }
+
+  test("test extra slots increases allocated partition count") {
+    val extraSlots = 10
+    val numPartitions = 11
+    val extraSlotsConf = new CelebornConf()
+      .set(CelebornConf.MASTER_ENDPOINTS.key, s"localhost:$masterPort")
+      .set(CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key, "false")
+      .set(CelebornConf.CLIENT_SLOT_ASSIGN_EXTRA_SLOTS.key, extraSlots.toString)
+
+    val app = s"app-extra-slots-${System.currentTimeMillis()}"
+    val lifecycleManager = new LifecycleManager(app, extraSlotsConf)
+    val shuffleClient = new ShuffleClientImpl(app, extraSlotsConf, userIdentifier)
+    shuffleClient.setupLifecycleManagerRef(lifecycleManager.self)
+
+    val shuffleId = 0
+    shuffleClient.getPartitionLocation(shuffleId, 8, numPartitions)
+
+    val totalSlots = lifecycleManager.workerSnapshots(shuffleId)
+      .values().asScala
+      .map(_.getPrimaryPartitions().size()).sum
+    assert(
+      totalSlots == numPartitions + extraSlots,
+      s"Expected ${numPartitions + extraSlots} slots but got $totalSlots")
+
+    shuffleClient.shutdown()
+    lifecycleManager.stop()
+  }
+
+  test("test zero extra slots keeps original partition count") {
+    val numPartitions = 11
+    val zeroExtraSlotsConf = new CelebornConf()
+      .set(CelebornConf.MASTER_ENDPOINTS.key, s"localhost:$masterPort")
+      .set(CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key, "false")
+      .set(CelebornConf.CLIENT_SLOT_ASSIGN_EXTRA_SLOTS.key, "0")
+
+    val app = s"app-zero-extra-slots-${System.currentTimeMillis()}"
+    val lifecycleManager = new LifecycleManager(app, zeroExtraSlotsConf)
+    val shuffleClient = new ShuffleClientImpl(app, zeroExtraSlotsConf, userIdentifier)
+    shuffleClient.setupLifecycleManagerRef(lifecycleManager.self)
+
+    val shuffleId = 0
+    shuffleClient.getPartitionLocation(shuffleId, 8, numPartitions)
+
+    val totalSlots = lifecycleManager.workerSnapshots(shuffleId)
+      .values().asScala
+      .map(_.getPrimaryPartitions().size()).sum
+    assert(totalSlots == numPartitions, s"Expected $numPartitions slots but got $totalSlots")
+
+    shuffleClient.shutdown()
     lifecycleManager.stop()
   }
 
