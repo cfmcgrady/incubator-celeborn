@@ -204,6 +204,10 @@ class CommitManager(appUniqueId: String, val conf: CelebornConf, lifecycleManage
     getCommitHandler(shuffleId).getMapperAttempts(shuffleId)
   }
 
+  def areAllMapperAttemptsFinished(shuffleId: Int): Boolean = {
+    getCommitHandler(shuffleId).areAllMapperAttemptsFinished(shuffleId)
+  }
+
   def finishMapperAttempt(
       shuffleId: Int,
       mapId: Int,
@@ -284,7 +288,8 @@ class CommitManager(appUniqueId: String, val conf: CelebornConf, lifecycleManage
               lifecycleManager.shuffleAllocatedWorkers,
               committedPartitionInfo,
               lifecycleManager.workerStatusTracker,
-              lifecycleManager.rpcSharedThreadPool)
+              lifecycleManager.rpcSharedThreadPool,
+              lifecycleManager)
           case PartitionType.MAP => new MapPartitionCommitHandler(
               appUniqueId,
               conf,

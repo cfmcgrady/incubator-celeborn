@@ -800,7 +800,8 @@ trait SparkClientProjects {
               name.startsWith("netty-") ||
               name.startsWith("commons-lang3-") ||
               name.startsWith("metrics-core-") ||
-              name.startsWith("RoaringBitmap-"))
+              name.startsWith("RoaringBitmap-") ||
+              name.startsWith("commons-io-"))
           }
         },
 
@@ -810,7 +811,8 @@ trait SparkClientProjects {
           ShadeRule.rename("com.google.common.**" -> "org.apache.celeborn.shaded.com.google.common.@1").inAll,
           ShadeRule.rename("io.netty.**" -> "org.apache.celeborn.shaded.io.netty.@1").inAll,
           ShadeRule.rename("org.apache.commons.**" -> "org.apache.celeborn.shaded.org.apache.commons.@1").inAll,
-          ShadeRule.rename("org.roaringbitmap.**" -> "org.apache.celeborn.shaded.org.roaringbitmap.@1").inAll
+          ShadeRule.rename("org.roaringbitmap.**" -> "org.apache.celeborn.shaded.org.roaringbitmap.@1").inAll,
+          ShadeRule.rename("org.apache.commons.io.**" -> "org.apache.celeborn.shaded.org.apache.commons.io.@1").inAll
         ),
 
         (assembly / assemblyMergeStrategy) := {

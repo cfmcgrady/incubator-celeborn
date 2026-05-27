@@ -57,6 +57,11 @@ class CelebornShuffleReader[K, C](
     handle.userIdentifier,
     handle.extension)
 
+  // Register the deserialize function for broadcast GetReducerFileGroupResponse
+  ShuffleClient.registerDeserializeReducerFileGroupResponseFunction(
+    (shuffleId: Integer, bytes: Array[Byte]) =>
+      SparkUtils.deserializeGetReducerFileGroupResponse(shuffleId, bytes))
+
   private val exceptionRef = new AtomicReference[IOException]
   private val throwsFetchFailure = handle.throwsFetchFailure
 

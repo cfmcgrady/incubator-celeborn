@@ -18,8 +18,10 @@
 package org.apache.celeborn.client;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.BiFunction;
 
 import org.apache.hadoop.fs.FileSystem;
 import org.slf4j.Logger;
@@ -30,6 +32,7 @@ import org.apache.celeborn.client.read.MetricsCallback;
 import org.apache.celeborn.common.CelebornConf;
 import org.apache.celeborn.common.identity.UserIdentifier;
 import org.apache.celeborn.common.protocol.PartitionLocation;
+import org.apache.celeborn.common.protocol.message.ControlMessages;
 import org.apache.celeborn.common.protocol.message.FailureType;
 import org.apache.celeborn.common.rpc.RpcEndpointRef;
 import org.apache.celeborn.common.util.CelebornHadoopUtils;
@@ -47,6 +50,10 @@ public abstract class ShuffleClient {
   private static volatile FileSystem hdfsFs;
   private static LongAdder totalReadCounter = new LongAdder();
   private static LongAdder localShuffleReadCounter = new LongAdder();
+
+  private static volatile Optional<
+          BiFunction<Integer, byte[], ControlMessages.GetReducerFileGroupResponse>>
+      deserializeReducerFileGroupResponseFunction = Optional.empty();
 
   // for testing
   public static void reset() {
@@ -265,4 +272,21 @@ public abstract class ShuffleClient {
       int appShuffleId, int shuffleId, FailureType failureType);
 
   public abstract void reportFailure(FailureType failureType);
+
+  public static void registerDeserializeReducerFileGroupResponseFunction(
+      BiFunction<Integer, byte[], ControlMessages.GetReducerFileGroupResponse> function) {
+    if (!deserializeReducerFileGroupResponseFunction.isPresent()) {
+      deserializeReducerFileGroupResponseFunction = Optional.ofNullable(function);
+    }
+  }
+
+  public static ControlMessages.GetReducerFileGroupResponse deserializeReducerFileGroupResponse(
+      int shuffleId, byte[] bytes) {
+    if (!deserializeReducerFileGroupResponseFunction.isPresent()) {
+      // Should never happen
+      logger.warn("DeserializeReducerFileGroupResponseFunction is not registered.");
+      return null;
+    }
+    return deserializeReducerFileGroupResponseFunction.get().apply(shuffleId, bytes);
+  }
 }

@@ -54,20 +54,20 @@ public class PartitionLocation implements Serializable {
 
   private int id;
   private int epoch;
+
   private String host;
-  private int rpcPort;
-  private int pushPort;
-  private int fetchPort;
-  private int replicatePort;
-  private Mode mode;
+  private short rpcPort;
+  private short pushPort;
+  private short fetchPort;
+  private short replicatePort;
+  private byte mode;
+
   private PartitionLocation peer;
   private StorageInfo storageInfo;
   private RoaringBitmap mapIdBitMap;
   private int splitStart;
   private int splitEnd;
-  private transient String _hostPushPort;
-  private transient String _hostFetchPort;
-  private transient String _splitRange;
+
   private transient PartitionLocation parent;
 
   public PartitionLocation(PartitionLocation loc) {
@@ -84,9 +84,6 @@ public class PartitionLocation implements Serializable {
     this.mapIdBitMap = loc.mapIdBitMap;
     this.splitStart = loc.splitStart;
     this.splitEnd = loc.splitEnd;
-    this._splitRange = id + "_" + splitStart + "_" + splitEnd;
-    this._hostPushPort = host + ":" + pushPort;
-    this._hostFetchPort = host + ":" + fetchPort;
   }
 
   public PartitionLocation(
@@ -180,20 +177,19 @@ public class PartitionLocation implements Serializable {
       int splitEnd) {
     this.id = id;
     this.epoch = epoch;
-    this.host = host;
-    this.rpcPort = rpcPort;
-    this.pushPort = pushPort;
-    this.fetchPort = fetchPort;
-    this.replicatePort = replicatePort;
-    this.mode = mode;
+
+    this.host = (host != null) ? host.intern() : null;
+    this.rpcPort = (short) rpcPort;
+    this.pushPort = (short) pushPort;
+    this.fetchPort = (short) fetchPort;
+    this.replicatePort = (short) replicatePort;
+    this.mode = mode.mode();
+
     this.peer = peer;
     this.storageInfo = hint;
     this.mapIdBitMap = mapIdBitMap;
-    this._hostPushPort = host + ":" + pushPort;
-    this._hostFetchPort = host + ":" + fetchPort;
     this.splitStart = splitStart;
     this.splitEnd = splitEnd;
-    this._splitRange = id + "_" + splitStart + "_" + splitEnd;
   }
 
   public PartitionLocation getParent() {
@@ -231,7 +227,6 @@ public class PartitionLocation implements Serializable {
   public void doSetSplitRange(int splitStart, int splitEnd) {
     this.splitStart = splitStart;
     this.splitEnd = splitEnd;
-    this._splitRange = id + "_" + splitStart + "_" + splitEnd;
   }
 
   public void setSplitRange(int splitStart, int splitEnd) {
@@ -242,7 +237,7 @@ public class PartitionLocation implements Serializable {
   }
 
   public String getSplitRange() {
-    return _splitRange;
+    return id + "_" + splitStart + "_" + splitEnd;
   }
 
   public String getHost() {
@@ -250,52 +245,68 @@ public class PartitionLocation implements Serializable {
   }
 
   public void setHost(String host) {
-    this.host = host;
+    this.host = (host != null) ? host.intern() : null;
   }
 
   public int getPushPort() {
-    return pushPort;
+    return pushPort & 0xFFFF;
   }
 
   public void setPushPort(int pushPort) {
-    this.pushPort = pushPort;
+    this.pushPort = (short) pushPort;
   }
 
   public int getFetchPort() {
-    return fetchPort;
+    return fetchPort & 0xFFFF;
   }
 
   public void setFetchPort(int fetchPort) {
-    this.fetchPort = fetchPort;
+    this.fetchPort = (short) fetchPort;
+  }
+
+  public int getRpcPort() {
+    return rpcPort & 0xFFFF;
+  }
+
+  public void setRpcPort(int rpcPort) {
+    this.rpcPort = (short) rpcPort;
+  }
+
+  public int getReplicatePort() {
+    return replicatePort & 0xFFFF;
+  }
+
+  public void setReplicatePort(int replicatePort) {
+    this.replicatePort = (short) replicatePort;
   }
 
   public String hostAndPorts() {
     return "host-rpcPort-pushPort-fetchPort-replicatePort:"
         + host
         + "-"
-        + rpcPort
+        + getRpcPort()
         + "-"
-        + pushPort
+        + getPushPort()
         + "-"
-        + fetchPort
+        + getFetchPort()
         + "-"
-        + replicatePort;
+        + getReplicatePort();
   }
 
   public String hostAndFetchPort() {
-    return _hostFetchPort;
+    return host + ":" + getFetchPort();
   }
 
   public String hostAndPushPort() {
-    return _hostPushPort;
+    return host + ":" + getPushPort();
   }
 
   public Mode getMode() {
-    return mode;
+    return getMode(this.mode);
   }
 
   public void setMode(Mode mode) {
-    this.mode = mode;
+    this.mode = mode.mode();
   }
 
   public PartitionLocation getPeer() {
@@ -316,23 +327,7 @@ public class PartitionLocation implements Serializable {
 
   /** @see PartitionLocation#getFileName */
   public String getFileName() {
-    return id + "-" + epoch + "-" + mode.mode;
-  }
-
-  public int getRpcPort() {
-    return rpcPort;
-  }
-
-  public void setRpcPort(int rpcPort) {
-    this.rpcPort = rpcPort;
-  }
-
-  public int getReplicatePort() {
-    return replicatePort;
-  }
-
-  public void setReplicatePort(int replicatePort) {
-    this.replicatePort = replicatePort;
+    return id + "-" + epoch + "-" + mode;
   }
 
   public StorageInfo getStorageInfo() {
@@ -376,15 +371,15 @@ public class PartitionLocation implements Serializable {
         + "\n  host-rpcPort-pushPort-fetchPort-replicatePort:"
         + host
         + "-"
-        + rpcPort
+        + getRpcPort()
         + "-"
-        + pushPort
+        + getPushPort()
         + "-"
-        + fetchPort
+        + getFetchPort()
         + "-"
-        + replicatePort
+        + getReplicatePort()
         + "\n  mode:"
-        + mode
+        + getMode()
         + "\n  peer:("
         + peerAddr
         + ")\n  storage hint:"
@@ -395,10 +390,13 @@ public class PartitionLocation implements Serializable {
   }
 
   public WorkerInfo getWorker() {
-    return new WorkerInfo(host, rpcPort, pushPort, fetchPort, replicatePort);
+    return new WorkerInfo(host, getRpcPort(), getPushPort(), getFetchPort(), getReplicatePort());
   }
 
   public RoaringBitmap getMapIdBitMap() {
+    if (mapIdBitMap == null) {
+      mapIdBitMap = new RoaringBitmap();
+    }
     return mapIdBitMap;
   }
 
