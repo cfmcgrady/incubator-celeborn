@@ -332,23 +332,37 @@ public class SlotsAllocator {
     // workerInfo -> (diskIndexForPrimary, diskIndexForReplica)
     Map<WorkerInfo, Integer> workerDiskIndexForPrimary = new HashMap<>();
     Map<WorkerInfo, Integer> workerDiskIndexForReplica = new HashMap<>();
-    List<Integer> partitionIdList = new ArrayList<>(partitionIds);
-
     final int workerSize = workers.size();
     final IntUnaryOperator incrementIndex = v -> (v + 1) % workerSize;
     int primaryIndex = rand.nextInt(workerSize);
     int replicaIndex = rand.nextInt(workerSize);
 
-    Iterator<Integer> iter = partitionIdList.iterator();
+    // Pre-compute usable slots per worker to avoid repeated stream operations O(N*W) -> O(W)
+    long[] workerUsableSlots = null;
+    if (slotsRestrictions != null && !slotsRestrictions.isEmpty()) {
+      workerUsableSlots = new long[workerSize];
+      for (int i = 0; i < workerSize; i++) {
+        List<UsableDiskInfo> disks = slotsRestrictions.get(workers.get(i));
+        if (disks != null) {
+          for (UsableDiskInfo d : disks) {
+            workerUsableSlots[i] += d.usableSlots;
+          }
+        }
+      }
+    }
+
+    // Use index-based iteration to avoid O(N^2) ArrayList.remove() arraycopy overhead.
+    // On break, return the unallocated remainder via subList.
+    int allocatedCount = 0;
     outer:
-    while (iter.hasNext()) {
+    for (int pidIdx = 0; pidIdx < partitionIds.size(); pidIdx++) {
       int nextPrimaryInd = primaryIndex;
 
-      int partitionId = iter.next();
+      int partitionId = partitionIds.get(pidIdx);
       StorageInfo storageInfo;
-      if (slotsRestrictions != null && !slotsRestrictions.isEmpty()) {
+      if (workerUsableSlots != null) {
         // this means that we'll select a mount point
-        while (!haveUsableSlots(slotsRestrictions, workers, nextPrimaryInd)) {
+        while (workerUsableSlots[nextPrimaryInd] <= 0) {
           nextPrimaryInd = incrementIndex.applyAsInt(nextPrimaryInd);
           if (nextPrimaryInd == primaryIndex) {
             break outer;
@@ -361,6 +375,7 @@ public class SlotsAllocator {
                 slotsRestrictions,
                 workerDiskIndexForPrimary,
                 availableStorageTypes);
+        workerUsableSlots[nextPrimaryInd]--;
       } else {
         if (StorageInfo.localDiskAvailable(availableStorageTypes)) {
           while (!workers.get(nextPrimaryInd).haveDisk()) {
@@ -381,7 +396,7 @@ public class SlotsAllocator {
         int nextReplicaInd = replicaIndex;
         if (slotsRestrictions != null) {
           while (nextReplicaInd == nextPrimaryInd
-              || !haveUsableSlots(slotsRestrictions, workers, nextReplicaInd)
+              || (workerUsableSlots != null && workerUsableSlots[nextReplicaInd] <= 0)
               || !satisfyRackAware(shouldRackAware, workers, nextPrimaryInd, nextReplicaInd)) {
             nextReplicaInd = incrementIndex.applyAsInt(nextReplicaInd);
             if (nextReplicaInd == replicaIndex) {
@@ -395,6 +410,9 @@ public class SlotsAllocator {
                   slotsRestrictions,
                   workerDiskIndexForReplica,
                   availableStorageTypes);
+          if (workerUsableSlots != null) {
+            workerUsableSlots[nextReplicaInd]--;
+          }
         } else if (shouldRackAware) {
           while (nextReplicaInd == nextPrimaryInd
               || !satisfyRackAware(true, workers, nextPrimaryInd, nextReplicaInd)) {
@@ -433,9 +451,12 @@ public class SlotsAllocator {
               workers.get(nextPrimaryInd), v -> new Tuple2<>(new ArrayList<>(), new ArrayList<>()));
       locations._1.add(primaryPartition);
       primaryIndex = incrementIndex.applyAsInt(nextPrimaryInd);
-      iter.remove();
+      allocatedCount++;
     }
-    return partitionIdList;
+    if (allocatedCount == partitionIds.size()) {
+      return Collections.emptyList();
+    }
+    return new ArrayList<>(partitionIds.subList(allocatedCount, partitionIds.size()));
   }
 
   private static boolean haveUsableSlots(

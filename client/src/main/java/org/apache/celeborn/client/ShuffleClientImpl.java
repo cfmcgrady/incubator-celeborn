@@ -597,14 +597,31 @@ public class ShuffleClientImpl extends ShuffleClient {
         StatusCode respStatus = Utils.toStatusCode(response.getStatus());
         if (StatusCode.SUCCESS.equals(respStatus)) {
           ConcurrentHashMap<Integer, PartitionLocation> result = JavaUtils.newConcurrentHashMap();
-          for (int i = 0; i < response.getPartitionLocationsList().size(); i++) {
-            PartitionLocation partitionLoc =
-                PbSerDeUtils.fromPbPartitionLocation(response.getPartitionLocationsList().get(i));
-            pushExcludedWorkers.remove(partitionLoc.hostAndPushPort());
-            if (partitionLoc.hasPeer()) {
-              pushExcludedWorkers.remove(partitionLoc.getPeer().hostAndPushPort());
+          if (response.getCompactPartitionLocationsCount() > 0) {
+            // Compact format: resolve from worker/mountPoint dictionaries
+            java.util.List<PbCompactWorkerInfo> workerList = response.getWorkerInfosList();
+            java.util.List<String> mountPoints = response.getMountPointsList();
+            for (int i = 0; i < response.getCompactPartitionLocationsCount(); i++) {
+              PartitionLocation partitionLoc =
+                  PbSerDeUtils.fromPbCompactPartitionLocation(
+                      response.getCompactPartitionLocations(i), workerList, mountPoints);
+              pushExcludedWorkers.remove(partitionLoc.hostAndPushPort());
+              if (partitionLoc.hasPeer()) {
+                pushExcludedWorkers.remove(partitionLoc.getPeer().hostAndPushPort());
+              }
+              result.put(partitionLoc.getId(), partitionLoc);
             }
-            result.put(partitionLoc.getId(), partitionLoc);
+          } else {
+            // Legacy format
+            for (int i = 0; i < response.getPartitionLocationsList().size(); i++) {
+              PartitionLocation partitionLoc =
+                  PbSerDeUtils.fromPbPartitionLocation(response.getPartitionLocationsList().get(i));
+              pushExcludedWorkers.remove(partitionLoc.hostAndPushPort());
+              if (partitionLoc.hasPeer()) {
+                pushExcludedWorkers.remove(partitionLoc.getPeer().hostAndPushPort());
+              }
+              result.put(partitionLoc.getId(), partitionLoc);
+            }
           }
           return result;
         } else if (StatusCode.SLOT_NOT_AVAILABLE.equals(respStatus)) {
