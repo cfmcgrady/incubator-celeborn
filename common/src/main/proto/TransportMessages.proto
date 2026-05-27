@@ -94,6 +94,8 @@ enum MessageType {
   SASL_REQUEST = 71;
   PUSH_MERGED_DATA_SPLIT_PARTITION_INFO = 91;
 
+  REQUEST_SLOTS_V2 = 92;
+
   // Start internal message IDs at 1024 to simplify cherry-picking updates from the upstream project
   REPORT_FAILURE = 1024;
   REPORT_APPLICATION_COUNTER_METRICS = 1025;
@@ -258,7 +260,10 @@ message PbRegisterMapPartitionTask {
 
 message PbRegisterShuffleResponse {
   int32 status = 1;
-  repeated PbPartitionLocation partitionLocations = 2;
+  repeated PbPartitionLocation partitionLocations = 2; // legacy format
+  repeated PbCompactWorkerInfo workerInfos = 3;
+  repeated PbCompactPartitionLocation compactPartitionLocations = 4;
+  repeated string mountPoints = 5;
 }
 
 message PbRequestSlots {
@@ -274,6 +279,20 @@ message PbRequestSlots {
   int32 maxWorkers = 10;
   int32 availableStorageTypes = 11;
   repeated PbWorkerInfo excludedWorkerSet = 12;
+}
+
+message PbRequestSlotsV2 {
+  string applicationId = 1;
+  int32 shuffleId = 2;
+  int32 numPartitions = 3;
+  string hostname = 4;
+  bool shouldReplicate = 5;
+  string requestId = 6;
+  PbUserIdentifier userIdentifier = 7;
+  bool shouldRackAware = 8;
+  int32 maxWorkers = 9;
+  int32 availableStorageTypes = 10;
+  repeated PbWorkerInfo excludedWorkerSet = 11;
 }
 
 message PbSlotInfo {

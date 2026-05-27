@@ -55,11 +55,7 @@ class LifecycleManagerCommitFilesSuite extends WithShuffleClientSuite with MiniC
     val conf = celebornConf.clone
     conf.set(CelebornConf.TEST_MOCK_COMMIT_FILES_FAILURE.key, "false")
     val lifecycleManager: LifecycleManager = new LifecycleManager(APP, conf)
-    val ids = new util.ArrayList[Integer](10)
-    0 until 10 foreach {
-      ids.add(_)
-    }
-    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, ids)
+    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, 10)
     assert(res.status == StatusCode.SUCCESS)
     assert(res.workerResource.keySet().size() == 3)
 
@@ -105,11 +101,7 @@ class LifecycleManagerCommitFilesSuite extends WithShuffleClientSuite with MiniC
     val conf = celebornConf.clone
     conf.set(CelebornConf.TEST_MOCK_COMMIT_FILES_FAILURE.key, "true")
     val lifecycleManager: LifecycleManager = new LifecycleManager(APP, conf)
-    val ids = new util.ArrayList[Integer](10)
-    0 until 10 foreach {
-      ids.add(_)
-    }
-    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, ids)
+    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, 10)
     assert(res.status == StatusCode.SUCCESS)
     assert(res.workerResource.keySet().size() == 3)
 
@@ -158,11 +150,7 @@ class LifecycleManagerCommitFilesSuite extends WithShuffleClientSuite with MiniC
     val shuffleClient = new ShuffleClientImpl(APP, conf, userIdentifier)
     shuffleClient.setupLifecycleManagerRef(lifecycleManager.self)
 
-    val ids = new util.ArrayList[Integer](3)
-    0 until 3 foreach {
-      ids.add(_)
-    }
-    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, ids)
+    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, 3)
     assert(res.status == StatusCode.SUCCESS)
     assert(res.workerResource.keySet().size() == 3)
 
@@ -235,11 +223,7 @@ class LifecycleManagerCommitFilesSuite extends WithShuffleClientSuite with MiniC
     val conf = celebornConf.clone
     conf.set(CelebornConf.TEST_MOCK_COMMIT_FILES_FAILURE.key, "true")
     val lifecycleManager: LifecycleManager = new LifecycleManager(APP, conf)
-    val ids = new util.ArrayList[Integer](1000)
-    0 until 1000 foreach {
-      ids.add(_)
-    }
-    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, ids)
+    val res = lifecycleManager.requestMasterRequestSlotsWithRetry(shuffleId, 1000)
     assert(res.status == StatusCode.SUCCESS)
 
     lifecycleManager.setupEndpoints(

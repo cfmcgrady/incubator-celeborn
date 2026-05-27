@@ -157,18 +157,33 @@ object ControlMessages extends Logging {
   object RegisterShuffleResponse {
     def apply(
         status: StatusCode,
-        partitionLocations: Array[PartitionLocation]): PbRegisterShuffleResponse =
-      PbRegisterShuffleResponse.newBuilder()
+        partitionLocations: Array[PartitionLocation]): PbRegisterShuffleResponse = {
+      val builder = PbRegisterShuffleResponse.newBuilder()
         .setStatus(status.getValue)
-        .addAllPartitionLocations(
-          partitionLocations.map(PbSerDeUtils.toPbPartitionLocation).toSeq.asJava)
-        .build()
+      if (partitionLocations.nonEmpty) {
+        // Use compact format with worker/mountPoint dictionaries
+        val workerDict = new util.LinkedHashMap[WorkerInfo, Integer]()
+        val mountPointDict = new util.LinkedHashMap[String, Integer]()
+        partitionLocations.foreach { loc =>
+          builder.addCompactPartitionLocations(
+            PbSerDeUtils.toPbCompactPartitionLocation(
+              loc,
+              workerDict,
+              mountPointDict,
+              includeMapIdBitmap = false,
+              includeChunkOffsets = false))
+        }
+        builder.addAllWorkerInfos(PbSerDeUtils.buildWorkerInfoList(workerDict))
+        builder.addAllMountPoints(PbSerDeUtils.buildMountPointList(mountPointDict))
+      }
+      builder.build()
+    }
   }
 
   case class RequestSlots(
       applicationId: String,
       shuffleId: Int,
-      partitionIdList: util.ArrayList[Integer],
+      numPartitions: Int,
       hostname: String,
       shouldReplicate: Boolean,
       shouldRackAware: Boolean,
@@ -585,7 +600,7 @@ object ControlMessages extends Logging {
       case RequestSlots(
             applicationId,
             shuffleId,
-            partitionIdList,
+            numPartitions,
             hostname,
             shouldReplicate,
             shouldRackAware,
@@ -594,10 +609,10 @@ object ControlMessages extends Logging {
             availableStorageTypes,
             excludedWorkerSet,
             requestId) =>
-        val payload = PbRequestSlots.newBuilder()
+        val payload = PbRequestSlotsV2.newBuilder()
           .setApplicationId(applicationId)
           .setShuffleId(shuffleId)
-          .addAllPartitionIdList(partitionIdList)
+          .setNumPartitions(numPartitions)
           .setHostname(hostname)
           .setShouldReplicate(shouldReplicate)
           .setShouldRackAware(shouldRackAware)
@@ -608,7 +623,7 @@ object ControlMessages extends Logging {
           .addAllExcludedWorkerSet(excludedWorkerSet.map(
             PbSerDeUtils.toPbWorkerInfo(_, true)).asJava)
           .build().toByteArray
-        new TransportMessage(MessageType.REQUEST_SLOTS, payload)
+        new TransportMessage(MessageType.REQUEST_SLOTS_V2, payload)
 
       case ReleaseSlots(applicationId, shuffleId, workerIds, slots, requestId) =>
         val pbSlots = slots.asScala.map(slot =>
@@ -1043,7 +1058,7 @@ object ControlMessages extends Logging {
         RequestSlots(
           pbRequestSlots.getApplicationId,
           pbRequestSlots.getShuffleId,
-          new util.ArrayList[Integer](pbRequestSlots.getPartitionIdListList),
+          pbRequestSlots.getPartitionIdListList.size(),
           pbRequestSlots.getHostname,
           pbRequestSlots.getShouldReplicate,
           pbRequestSlots.getShouldRackAware,
@@ -1052,6 +1067,24 @@ object ControlMessages extends Logging {
           pbRequestSlots.getAvailableStorageTypes,
           excludedWorkerInfoSet,
           pbRequestSlots.getRequestId)
+
+      case REQUEST_SLOTS_V2_VALUE =>
+        val pb = PbRequestSlotsV2.parseFrom(message.getPayload)
+        val userIdentifier = PbSerDeUtils.fromPbUserIdentifier(pb.getUserIdentifier)
+        val excludedWorkerInfoSet =
+          pb.getExcludedWorkerSetList.asScala.map(PbSerDeUtils.fromPbWorkerInfo).toSet
+        RequestSlots(
+          pb.getApplicationId,
+          pb.getShuffleId,
+          pb.getNumPartitions,
+          pb.getHostname,
+          pb.getShouldReplicate,
+          pb.getShouldRackAware,
+          userIdentifier,
+          pb.getMaxWorkers,
+          pb.getAvailableStorageTypes,
+          excludedWorkerInfoSet,
+          pb.getRequestId)
 
       case REQUEST_SLOTS_RESPONSE_VALUE =>
         val pbRequestSlotsResponse = PbRequestSlotsResponse.parseFrom(message.getPayload)

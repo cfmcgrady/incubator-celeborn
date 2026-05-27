@@ -550,9 +550,22 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
               case PartitionType.MAP =>
                 if (response.getStatus == StatusCode.SUCCESS.getValue) {
                   val partitionLocations =
-                    response.getPartitionLocationsList.asScala.filter(
-                      _.getId == context.partitionId).map(r =>
-                      PbSerDeUtils.fromPbPartitionLocation(r)).toArray
+                    if (response.getCompactPartitionLocationsCount > 0) {
+                      val workerList = response.getWorkerInfosList
+                      val mountPoints = response.getMountPointsList
+                      response.getCompactPartitionLocationsList.asScala
+                        .filter(_.getId == context.partitionId)
+                        .map(loc =>
+                          PbSerDeUtils.fromPbCompactPartitionLocation(
+                            loc,
+                            workerList,
+                            mountPoints))
+                        .toArray
+                    } else {
+                      response.getPartitionLocationsList.asScala.filter(
+                        _.getId == context.partitionId).map(r =>
+                        PbSerDeUtils.fromPbPartitionLocation(r)).toArray
+                    }
                   processMapTaskReply(
                     shuffleId,
                     context.context,
@@ -582,13 +595,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
 
     // First, request to get allocated slots from Primary
     val totalPartitions = numPartitions + clientSlotAssignExtraSlots
-    val ids = new util.ArrayList[Integer](totalPartitions)
-    var idx = 0
-    while (idx < totalPartitions) {
-      ids.add(Integer.valueOf(idx))
-      idx += 1
-    }
-    val res = requestMasterRequestSlotsWithRetry(shuffleId, ids)
+    val res = requestMasterRequestSlotsWithRetry(shuffleId, totalPartitions)
 
     res.status match {
       case StatusCode.REQUEST_FAILED =>
@@ -1612,7 +1619,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
 
   def requestMasterRequestSlotsWithRetry(
       shuffleId: Int,
-      ids: util.ArrayList[Integer]): RequestSlotsResponse = {
+      numPartitions: Int): RequestSlotsResponse = {
     val excludedWorkerSet =
       if (excludedWorkersFilter) {
         workerStatusTracker.excludedWorkers.asScala.keys.toSet
@@ -1623,7 +1630,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       RequestSlots(
         appUniqueId,
         shuffleId,
-        ids,
+        numPartitions,
         lifecycleHost,
         pushReplicateEnabled,
         pushRackAwareEnabled,
