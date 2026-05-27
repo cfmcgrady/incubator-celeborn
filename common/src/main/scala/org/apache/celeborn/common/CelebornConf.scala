@@ -906,6 +906,7 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   def clientPushLimitStrategy: String = get(CLIENT_PUSH_LIMIT_STRATEGY)
   def clientPushSlowStartInitialSleepTime: Long = get(CLIENT_PUSH_SLOW_START_INITIAL_SLEEP_TIME)
   def clientSlotAssignMaxWorkers: Int = get(CLIENT_SLOT_ASSIGN_MAX_WORKERS)
+  def clientSlotAssignExtraSlots: Int = get(CLIENT_SLOT_ASSIGN_EXTRA_SLOTS)
   def clientPushSlowStartMaxSleepMills: Long = get(CLIENT_PUSH_SLOW_START_MAX_SLEEP_TIME)
   def clientPushLimitInFlightTimeoutMs: Long =
     if (clientPushReplicateEnabled) {
@@ -4119,6 +4120,15 @@ object CelebornConf extends Logging {
         s"from Master side and Client side, see `${CelebornConf.MASTER_SLOT_ASSIGN_MAX_WORKERS.key}`.")
       .intConf
       .createWithDefault(10000)
+
+  val CLIENT_SLOT_ASSIGN_EXTRA_SLOTS: ConfigEntry[Int] =
+    buildConf("celeborn.client.slot.assign.extraSlots")
+      .categories("client")
+      .version("0.4.2.6")
+      .doc("Extra slots number when requesting slots from master on client side. " +
+        "This will increase the number of partitions requested to get more worker slots for revive.")
+      .intConf
+      .createWithDefault(0)
 
   val CLIENT_CLOSE_IDLE_CONNECTIONS: ConfigEntry[Boolean] =
     buildConf("celeborn.client.closeIdleConnections")

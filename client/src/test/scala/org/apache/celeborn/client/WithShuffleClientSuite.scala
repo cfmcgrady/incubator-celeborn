@@ -33,6 +33,7 @@ import org.apache.celeborn.common.util.JavaUtils.timeOutOrMeetCondition
 trait WithShuffleClientSuite extends CelebornFunSuite {
 
   protected val celebornConf: CelebornConf = new CelebornConf()
+    .set(CelebornConf.CLIENT_SLOT_ASSIGN_EXTRA_SLOTS.key, "0")
 
   protected val APP = "app-1"
   protected val userIdentifier: UserIdentifier = UserIdentifier("mock", "mock")

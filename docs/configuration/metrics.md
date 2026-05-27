@@ -32,6 +32,7 @@ license: |
 | celeborn.metrics.prometheus.path | /metrics/prometheus | URI context path of prometheus metrics HTTP server. | 0.4.0 |  | 
 | celeborn.metrics.sample.rate | 1.0 | It controls if Celeborn collect timer metrics for some operations. Its value should be in [0.0, 1.0]. | 0.2.0 |  | 
 | celeborn.metrics.timer.slidingWindow.size | 4096 | The sliding window size of timer metric. | 0.2.0 |  | 
+| celeborn.metrics.worker.appLevel.enabled | true | When true, enable worker application level metrics. Note: applicationId is considered as a high cardinality label, be careful enabling it on metrics systems that are not optimized for high cardinality columns. | 0.6.0 |  | 
 | celeborn.metrics.worker.pauseSpentTime.forceAppend.threshold | 10 | Force append worker pause spent time even if worker still in pause serving state.Help user can find worker pause spent time increase, when worker always been pause state. |  |  | 
 | celeborn.metrics.worker.reportHistogram.interval | 10s | Interval for the worker reports histogram metrics. | 0.4.1.4 |  | 
 <!--end-include-->

@@ -320,6 +320,7 @@ class PartitionSplitSuite extends AnyFunSuite
         .set(CelebornConf.CLEINT_PATITION_SPLIT_NUM.key, splitNum.toString)
         .set(CelebornConf.TEST_CLIENT_MOCK_RESERVE_SLOTS_FAILURE.key, mockReserveFailure.toString)
         .set(CelebornConf.CLIENT_PUSH_REPLICATE_ENABLED.key, enableReplicate.toString)
+        .set(CelebornConf.CLIENT_SLOT_ASSIGN_EXTRA_SLOTS.key, "0")
       val lifecycleManager = new LifecycleManager(APP, clientConf)
       val shuffleClients = new util.ArrayList[ShuffleClientImpl]()
       for (i <- 0 until SHUFFLE_CLIENT_NUM) {
