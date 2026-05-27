@@ -28,7 +28,7 @@ import scala.collection.mutable
 import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.collect.Sets
 
-import org.apache.celeborn.client.{ShuffleCommittedInfo, WorkerStatusTracker}
+import org.apache.celeborn.client.{LifecycleManager, ShuffleCommittedInfo, WorkerStatusTracker}
 import org.apache.celeborn.client.CommitManager.CommittedPartitionInfo
 import org.apache.celeborn.client.LifecycleManager.{ShuffleAllocatedWorkers, ShuffleFailedWorkers}
 import org.apache.celeborn.common.CelebornConf
@@ -55,7 +55,8 @@ class ReducePartitionCommitHandler(
     shuffleAllocatedWorkers: ShuffleAllocatedWorkers,
     committedPartitionInfo: CommittedPartitionInfo,
     workerStatusTracker: WorkerStatusTracker,
-    sharedRpcPool: ThreadPoolExecutor)
+    sharedRpcPool: ThreadPoolExecutor,
+    lifecycleManager: LifecycleManager)
   extends CommitHandler(
     appUniqueId,
     conf,
@@ -70,9 +71,17 @@ class ReducePartitionCommitHandler(
   private val stageEndShuffleSet = ConcurrentHashMap.newKeySet[Int]()
   private val inProcessStageEndShuffleSet = ConcurrentHashMap.newKeySet[Int]()
   private val shuffleMapperAttempts = JavaUtils.newConcurrentHashMap[Int, Array[Int]]()
+  // TODO: Move this to native Int -> Int Map
+  private val shuffleToCompletedMappers = JavaUtils.newConcurrentHashMap[Int, Int]()
   private val stageEndTimeout = conf.clientPushStageEndTimeout
 
   private val rpcCacheSize = conf.clientRpcCacheSize
+  private val rangeReadFilterEnabled = conf.shuffleRangeReadFilterEnabled
+  private val optimizeSkewedPartitionReadEnabled =
+    conf.clientAdaptiveOptimizeSkewedPartitionReadEnabled
+  private val getReducerFileGroupResponseBroadcastEnabled = conf.getReducerFileGroupBroadcastEnabled
+  private val getReducerFileGroupResponseBroadcastMiniSize =
+    conf.getReducerFileGroupBroadcastMiniSize
   private val rpcCacheConcurrencyLevel = conf.clientRpcCacheConcurrencyLevel
   private val rpcCacheExpireTime = conf.clientRpcCacheExpireTime
 
@@ -138,6 +147,7 @@ class ReducePartitionCommitHandler(
     stageEndShuffleSet.remove(shuffleId)
     inProcessStageEndShuffleSet.remove(shuffleId)
     shuffleMapperAttempts.remove(shuffleId)
+    shuffleToCompletedMappers.remove(shuffleId)
     super.removeExpiredShuffle(shuffleId)
   }
 
@@ -246,6 +256,21 @@ class ReducePartitionCommitHandler(
     shuffleMapperAttempts.get(shuffleId)
   }
 
+  override def areAllMapperAttemptsFinished(shuffleId: Int): Boolean = {
+    val attempts = shuffleMapperAttempts.get(shuffleId)
+    if (null != attempts) {
+      attempts.length == shuffleToCompletedMappers.get(shuffleId)
+    } else {
+      false
+    }
+  }
+
+  private val valueIncrementFunction = new function.BiFunction[Int, Int, Int]() {
+    override def apply(key: Int, value: Int): Int = {
+      value + 1
+    }
+  }
+
   override def finishMapperAttempt(
       shuffleId: Int,
       mapId: Int,
@@ -263,6 +288,10 @@ class ReducePartitionCommitHandler(
       val attempts = shuffleMapperAttempts.get(shuffleId)
       if (attempts(mapId) < 0) {
         attempts(mapId) = attemptId
+        // increment completed mappers
+        val completedMappers =
+          shuffleToCompletedMappers.compute(shuffleId, valueIncrementFunction)
+
         if (null != pushFailedBatches && !pushFailedBatches.isEmpty) {
           val pushFailedBatchesMap = shufflePushFailedBatches.computeIfAbsent(
             shuffleId,
@@ -275,7 +304,7 @@ class ReducePartitionCommitHandler(
           }
         }
         // Mapper with this attemptId finished, also check all other mapper finished or not.
-        (true, areAllMapperAttemptsFinished(attempts))
+        (true, completedMappers == attempts.length)
       } else {
         // Mapper with another attemptId finished, skip this request
         (false, false)
@@ -293,8 +322,9 @@ class ReducePartitionCommitHandler(
     shuffleMapperAttempts.synchronized {
       if (!shuffleMapperAttempts.containsKey(shuffleId)) {
         val attempts = new Array[Int](numMappers)
-        0 until numMappers foreach (idx => attempts(idx) = -1)
+        util.Arrays.fill(attempts, -1)
         shuffleMapperAttempts.put(shuffleId, attempts)
+        shuffleToCompletedMappers.put(shuffleId, 0)
       }
     }
   }
@@ -305,14 +335,24 @@ class ReducePartitionCommitHandler(
         GetReducerFileGroupResponse(
           StatusCode.SHUFFLE_DATA_LOST,
           JavaUtils.newConcurrentHashMap(),
-          Array.empty))
+          Array.empty,
+          new util.HashSet[Integer]()))
     } else {
       // LocalNettyRpcCallContext is for the UTs
       if (context.isInstanceOf[LocalNettyRpcCallContext]) {
-        context.reply(GetReducerFileGroupResponse(
+        var response = GetReducerFileGroupResponse(
           StatusCode.SUCCESS,
           reducerFileGroupsMap.getOrDefault(shuffleId, JavaUtils.newConcurrentHashMap()),
-          getMapperAttempts(shuffleId)))
+          getMapperAttempts(shuffleId),
+          includeMapIdBitmap = rangeReadFilterEnabled,
+          includeChunkOffsets = optimizeSkewedPartitionReadEnabled)
+
+        // only check whether broadcast enabled for the UTs
+        if (getReducerFileGroupResponseBroadcastEnabled) {
+          response = broadcastGetReducerFileGroup(shuffleId, response)
+        }
+
+        context.reply(response)
       } else {
         val cachedMsg = getReducerFileGroupRpcCache.get(
           shuffleId,
@@ -325,12 +365,46 @@ class ReducePartitionCommitHandler(
                 pushFailedBatches =
                   shufflePushFailedBatches.getOrDefault(
                     shuffleId,
-                    new util.HashMap[String, util.Set[PushFailedBatch]]()))
-              context.asInstanceOf[RemoteNettyRpcCallContext].nettyEnv.serialize(returnedMsg)
+                    new util.HashMap[String, util.Set[PushFailedBatch]]()),
+                includeMapIdBitmap = rangeReadFilterEnabled,
+                includeChunkOffsets = optimizeSkewedPartitionReadEnabled)
+
+              val serializedMsg =
+                context.asInstanceOf[RemoteNettyRpcCallContext].nettyEnv.serialize(returnedMsg)
+
+              logInfo(
+                s"Shuffle $shuffleId GetReducerFileGroupResponse size ${serializedMsg.capacity()}")
+              if (getReducerFileGroupResponseBroadcastEnabled &&
+                serializedMsg.capacity() >= getReducerFileGroupResponseBroadcastMiniSize) {
+                val broadcastMsg = broadcastGetReducerFileGroup(shuffleId, returnedMsg)
+                if (broadcastMsg != returnedMsg) {
+                  val serializedBroadcastMsg =
+                    context.asInstanceOf[RemoteNettyRpcCallContext].nettyEnv.serialize(broadcastMsg)
+                  logInfo(s"Shuffle $shuffleId GetReducerFileGroupResponse size" +
+                    s" ${serializedMsg.capacity()} reached the broadcast threshold" +
+                    s" $getReducerFileGroupResponseBroadcastMiniSize," +
+                    s" the broadcast response size is ${serializedBroadcastMsg.capacity()}.")
+                  serializedBroadcastMsg
+                } else {
+                  serializedMsg
+                }
+              } else {
+                serializedMsg
+              }
             }
           })
         context.asInstanceOf[RemoteNettyRpcCallContext].callback.onSuccess(cachedMsg)
       }
+    }
+  }
+
+  private def broadcastGetReducerFileGroup(
+      shuffleId: Int,
+      response: GetReducerFileGroupResponse): GetReducerFileGroupResponse = {
+    lifecycleManager.broadcastGetReducerFileGroupResponse(shuffleId, response) match {
+      case Some(broadcastBytes) if broadcastBytes.nonEmpty =>
+        GetReducerFileGroupResponse(response.status, broadcast = broadcastBytes)
+      case _ => response
     }
   }
 
@@ -361,14 +435,4 @@ class ReducePartitionCommitHandler(
     (timeout <= 0, stageEndTimeout - timeout)
   }
 
-  private def areAllMapperAttemptsFinished(attempts: Array[Int]): Boolean = {
-    var i = attempts.length - 1
-    while (i >= 0) {
-      if (attempts(i) < 0) {
-        return false
-      }
-      i -= 1
-    }
-    true
-  }
 }

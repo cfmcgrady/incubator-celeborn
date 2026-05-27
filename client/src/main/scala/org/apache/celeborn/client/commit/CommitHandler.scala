@@ -193,6 +193,8 @@ abstract class CommitHandler(
 
   def getMapperAttempts(shuffleId: Int): Array[Int]
 
+  def areAllMapperAttemptsFinished(shuffleId: Int): Boolean
+
   /**
    * return (thisMapperAttemptedFinishedSuccessOrNot, allMapperFinishedOrNot)
    */

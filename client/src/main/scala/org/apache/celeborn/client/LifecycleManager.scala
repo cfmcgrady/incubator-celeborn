@@ -797,8 +797,8 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
       return
     }
 
-    def isAllMaptaskEnd(shuffleId: Int): Boolean = {
-      !commitManager.getMapperAttempts(shuffleId).exists(_ < 0)
+    def areAllMapTasksEnd(shuffleId: Int): Boolean = {
+      commitManager.areAllMapperAttemptsFinished(shuffleId)
     }
 
     shuffleIds.synchronized {
@@ -835,7 +835,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
                 s"unexpected! unknown appShuffleId $appShuffleId when checking shuffle deterministic level"))
         }
       } else {
-        shuffleIds.values.map(v => v._1).toSeq.reverse.find(isAllMaptaskEnd) match {
+        shuffleIds.values.map(v => v._1).toSeq.reverse.find(areAllMapTasksEnd) match {
           case Some(shuffleId) =>
             val pbGetShuffleIdResponse = {
               logDebug(
@@ -1593,6 +1593,7 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
         latestPartitionLocation.remove(shuffleId)
         commitManager.removeExpiredShuffle(shuffleId)
         changePartitionManager.removeExpiredShuffle(shuffleId)
+        invalidatedBroadcastGetReducerFileGroupResponse(shuffleId)
         val unregisterShuffleResponse = requestMasterUnregisterShuffle(
           UnregisterShuffle(appUniqueId, shuffleId, MasterClient.genRequestId()))
         // if unregister shuffle not success, wait next turn
@@ -1730,6 +1731,38 @@ class LifecycleManager(val appUniqueId: String, val conf: CelebornConf) extends 
   @volatile private var cancelShuffleCallback: Option[BiConsumer[Integer, String]] = None
   def registerCancelShuffleCallback(callback: BiConsumer[Integer, String]): Unit = {
     cancelShuffleCallback = Some(callback)
+  }
+
+  @volatile private var broadcastGetReducerFileGroupResponseCallback
+      : Option[function.BiFunction[Integer, GetReducerFileGroupResponse, Array[Byte]]] =
+    None
+  def registerBroadcastGetReducerFileGroupResponseCallback(call: function.BiFunction[
+    Integer,
+    GetReducerFileGroupResponse,
+    Array[Byte]]): Unit = {
+    broadcastGetReducerFileGroupResponseCallback = Some(call)
+  }
+
+  @volatile private var invalidatedBroadcastCallback: Option[Consumer[Integer]] =
+    None
+  def registerInvalidatedBroadcastCallback(call: Consumer[Integer]): Unit = {
+    invalidatedBroadcastCallback = Some(call)
+  }
+
+  def broadcastGetReducerFileGroupResponse(
+      shuffleId: Int,
+      response: GetReducerFileGroupResponse): Option[Array[Byte]] = {
+    broadcastGetReducerFileGroupResponseCallback match {
+      case Some(c) => Option(c.apply(shuffleId, response))
+      case _ => None
+    }
+  }
+
+  private def invalidatedBroadcastGetReducerFileGroupResponse(shuffleId: Int): Unit = {
+    invalidatedBroadcastCallback match {
+      case Some(c) => c.accept(shuffleId)
+      case _ =>
+    }
   }
 
   // Initialize at the end of LifecycleManager construction.

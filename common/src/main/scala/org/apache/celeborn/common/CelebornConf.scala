@@ -929,6 +929,10 @@ class CelebornConf(loadDefaults: Boolean) extends Cloneable with Logging with Se
   //                   Client Shuffle                    //
   // //////////////////////////////////////////////////////
   def shuffleWriterMode: ShuffleMode = ShuffleMode.valueOf(get(SPARK_SHUFFLE_WRITER_MODE))
+  def getReducerFileGroupBroadcastEnabled: Boolean =
+    get(CLIENT_SHUFFLE_GET_REDUCER_FILE_GROUP_BROADCAST_ENABLED)
+  def getReducerFileGroupBroadcastMiniSize: Long =
+    get(CLIENT_SHUFFLE_GET_REDUCER_FILE_GROUP_BROADCAST_MINI_SIZE)
   def shufflePartitionType: PartitionType = PartitionType.valueOf(get(SHUFFLE_PARTITION_TYPE))
   def shuffleRangeReadFilterEnabled: Boolean = get(SHUFFLE_RANGE_READ_FILTER_ENABLED)
   def shuffleForceFallbackEnabled: Boolean = get(SPARK_SHUFFLE_FORCE_FALLBACK_ENABLED)
@@ -4735,4 +4739,25 @@ object CelebornConf extends Logging {
       .version("0.4.2.5")
       .booleanConf
       .createWithDefault(false)
+
+  val CLIENT_SHUFFLE_GET_REDUCER_FILE_GROUP_BROADCAST_ENABLED: ConfigEntry[Boolean] =
+    buildConf("celeborn.client.spark.shuffle.getReducerFileGroup.broadcast.enabled")
+      .categories("client")
+      .doc(
+        "Whether to leverage Spark broadcast mechanism to send the GetReducerFileGroupResponse. " +
+          "If the response size is large and Spark executor number is large, the Spark driver network " +
+          "may be exhausted because each executor will pull the response from the driver. With broadcasting " +
+          "GetReducerFileGroupResponse, it prevents the driver from being the bottleneck in sending out multiple " +
+          "copies of the GetReducerFileGroupResponse (one per executor).")
+      .version("0.6.0")
+      .booleanConf
+      .createWithDefault(false)
+
+  val CLIENT_SHUFFLE_GET_REDUCER_FILE_GROUP_BROADCAST_MINI_SIZE: ConfigEntry[Long] =
+    buildConf("celeborn.client.spark.shuffle.getReducerFileGroup.broadcast.miniSize")
+      .categories("client")
+      .doc("The size at which we use Broadcast to send the GetReducerFileGroupResponse to the executors.")
+      .version("0.6.0")
+      .bytesConf(ByteUnit.BYTE)
+      .createWithDefaultString("512k")
 }

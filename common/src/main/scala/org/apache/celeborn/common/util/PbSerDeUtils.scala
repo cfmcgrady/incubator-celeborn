@@ -440,6 +440,232 @@ object PbSerDeUtils {
     builder.build()
   }
 
+  /**
+   * Resolve or assign a worker index from the dictionary for the given partition location.
+   * If the worker is not yet in the dictionary, it will be added with the next available index.
+   */
+  private def getOrAssignWorkerIndex(
+      location: PartitionLocation,
+      workerDict: util.Map[WorkerInfo, Integer]): Int = {
+    val worker = location.getWorker
+    val existingIndex = workerDict.get(worker)
+    if (existingIndex != null) {
+      existingIndex
+    } else {
+      val newIndex: Integer = workerDict.size()
+      workerDict.put(worker, newIndex)
+      newIndex
+    }
+  }
+
+  def toPbCompactPartitionLocation(
+      location: PartitionLocation,
+      workerDict: util.Map[WorkerInfo, Integer],
+      mountPointDict: util.Map[String, Integer],
+      includeMapIdBitmap: Boolean = true,
+      includeChunkOffsets: Boolean = true): PbCompactPartitionLocation = {
+    val workerIndex = getOrAssignWorkerIndex(location, workerDict)
+
+    val builder = PbCompactPartitionLocation.newBuilder
+    if (location.getMode eq Mode.PRIMARY) {
+      builder.setMode(PbPartitionLocation.Mode.Primary)
+    } else {
+      builder.setMode(PbPartitionLocation.Mode.Replica)
+    }
+    builder
+      .setId(location.getId)
+      .setEpoch(location.getEpoch)
+      .setWorkerIndex(workerIndex)
+      .setCompactStorageInfo(
+        toCompactStorageInfo(
+          location.getStorageInfo,
+          mountPointDict,
+          includeChunkOffsets))
+      .setSplitStart(location.getSplitStart)
+      .setSplitEnd(location.getSplitEnd)
+    if (includeMapIdBitmap) {
+      builder.setMapIdBitmap(Utils.roaringBitmapToByteString(location.getMapIdBitMap))
+    }
+
+    if (location.hasPeer) {
+      val peer = location.getPeer
+      val peerWorkerIndex = getOrAssignWorkerIndex(peer, workerDict)
+
+      val peerBuilder = PbCompactPartitionLocation.newBuilder
+      if (peer.getMode eq Mode.PRIMARY) {
+        peerBuilder.setMode(PbPartitionLocation.Mode.Primary)
+      } else {
+        peerBuilder.setMode(PbPartitionLocation.Mode.Replica)
+      }
+      peerBuilder
+        .setId(peer.getId)
+        .setEpoch(peer.getEpoch)
+        .setWorkerIndex(peerWorkerIndex)
+        .setCompactStorageInfo(
+          toCompactStorageInfo(
+            peer.getStorageInfo,
+            mountPointDict,
+            includeChunkOffsets))
+        .setSplitStart(location.getSplitStart)
+        .setSplitEnd(location.getSplitEnd)
+      if (includeMapIdBitmap) {
+        peerBuilder.setMapIdBitmap(Utils.roaringBitmapToByteString(location.getMapIdBitMap))
+      }
+      builder.setPeer(peerBuilder.build)
+    }
+    builder.build
+  }
+
+  private def toCompactStorageInfo(
+      storageInfo: StorageInfo,
+      mountPointDict: util.Map[String, Integer],
+      includeChunkOffsets: Boolean = true): PbCompactStorageInfo = {
+    val mountPoint = if (storageInfo.getMountPoint != null) storageInfo.getMountPoint else ""
+    val mountPointIndex = {
+      val existing = mountPointDict.get(mountPoint)
+      if (existing != null) {
+        existing
+      } else {
+        val idx: Integer = mountPointDict.size()
+        mountPointDict.put(mountPoint, idx)
+        idx
+      }
+    }
+
+    val builder = PbCompactStorageInfo.newBuilder()
+      .setType(storageInfo.getType.getValue)
+      .setMountPointIndex(mountPointIndex)
+      .setFinalResult(storageInfo.isFinalResult)
+      .setAvailableStorageTypes(storageInfo.availableStorageTypes)
+      .setFileSize(storageInfo.getFileSize)
+
+    if (includeChunkOffsets && storageInfo.getChunkOffsets != null) {
+      builder.addAllChunkOffsets(storageInfo.getChunkOffsets)
+    }
+
+    val filePath = storageInfo.getFilePath
+    if (filePath != null) {
+      builder.setFilePath(filePath)
+    }
+    builder.build()
+  }
+
+  def fromPbCompactPartitionLocation(
+      pbLoc: PbCompactPartitionLocation,
+      workerList: java.util.List[PbCompactWorkerInfo],
+      mountPoints: java.util.List[String]): PartitionLocation = {
+    var mode = Mode.PRIMARY
+    if (pbLoc.getMode.equals(PbPartitionLocation.Mode.Replica)) {
+      mode = Mode.REPLICA
+    }
+    val worker = workerList.get(pbLoc.getWorkerIndex)
+    val storageInfo =
+      fromCompactStorageInfo(pbLoc.getCompactStorageInfo, mountPoints)
+    val partitionLocation = new PartitionLocation(
+      pbLoc.getId,
+      pbLoc.getEpoch,
+      worker.getHost,
+      worker.getRpcPort,
+      worker.getPushPort,
+      worker.getFetchPort,
+      worker.getReplicatePort,
+      mode,
+      null,
+      storageInfo,
+      Utils.byteStringToRoaringBitmap(pbLoc.getMapIdBitmap),
+      pbLoc.getSplitStart,
+      pbLoc.getSplitEnd)
+    if (pbLoc.hasPeer) {
+      val peerPb = pbLoc.getPeer
+      var peerMode = Mode.PRIMARY
+      if (peerPb.getMode eq PbPartitionLocation.Mode.Replica) peerMode = Mode.REPLICA
+      val peerWorker = workerList.get(peerPb.getWorkerIndex)
+      val peerStorageInfo =
+        fromCompactStorageInfo(peerPb.getCompactStorageInfo, mountPoints)
+      val peerLocation = new PartitionLocation(
+        peerPb.getId,
+        peerPb.getEpoch,
+        peerWorker.getHost,
+        peerWorker.getRpcPort,
+        peerWorker.getPushPort,
+        peerWorker.getFetchPort,
+        peerWorker.getReplicatePort,
+        peerMode,
+        partitionLocation,
+        peerStorageInfo,
+        Utils.byteStringToRoaringBitmap(peerPb.getMapIdBitmap),
+        pbLoc.getSplitStart,
+        pbLoc.getSplitEnd)
+      partitionLocation.setPeer(peerLocation)
+    }
+    partitionLocation
+  }
+
+  private def fromCompactStorageInfo(
+      pb: PbCompactStorageInfo,
+      mountPoints: java.util.List[String]): StorageInfo = {
+    val mountPoint =
+      if (pb.getMountPointIndex < mountPoints.size()) {
+        mountPoints.get(pb.getMountPointIndex)
+      } else {
+        ""
+      }
+    val filePath = {
+      val fp = pb.getFilePath
+      if (fp == null || fp.isEmpty) null else fp
+    }
+    new StorageInfo(
+      StorageInfo.typesMap.get(pb.getType),
+      mountPoint,
+      pb.getFinalResult,
+      filePath,
+      pb.getAvailableStorageTypes,
+      pb.getFileSize,
+      pb.getChunkOffsetsList)
+  }
+
+  /**
+   * Build the ordered worker dictionary list from the WorkerInfo-to-index map.
+   *
+   * @param workerDict the WorkerInfo -> index map built during serialization
+   * @return ordered list of PbCompactWorkerInfo for the proto message
+   */
+  def buildWorkerInfoList(
+      workerDict: util.Map[WorkerInfo, Integer]): java.util.List[PbCompactWorkerInfo] = {
+    val result = new Array[PbCompactWorkerInfo](workerDict.size())
+    val iter = workerDict.entrySet().iterator()
+    while (iter.hasNext) {
+      val entry = iter.next()
+      val worker = entry.getKey
+      val index = entry.getValue
+      result(index) = PbCompactWorkerInfo.newBuilder()
+        .setHost(worker.host)
+        .setRpcPort(worker.rpcPort)
+        .setPushPort(worker.pushPort)
+        .setFetchPort(worker.fetchPort)
+        .setReplicatePort(worker.replicatePort)
+        .build()
+    }
+    java.util.Arrays.asList(result: _*)
+  }
+
+  /**
+   * Build the ordered mountPoint dictionary list from the mountPoint-to-index map.
+   *
+   * @param mountPointDict the mountPoint -> index map built during serialization
+   * @return ordered list of mountPoint strings for the proto message
+   */
+  def buildMountPointList(
+      mountPointDict: util.Map[String, Integer]): java.util.List[String] = {
+    val result = new Array[String](mountPointDict.size())
+    val iter = mountPointDict.entrySet().iterator()
+    while (iter.hasNext) {
+      val entry = iter.next()
+      result(entry.getValue) = entry.getKey
+    }
+    java.util.Arrays.asList(result: _*)
+  }
+
   def toPbPushFailedBatch(pushFailedBatch: PushFailedBatch): PbPushFailedBatch = {
     PbPushFailedBatch.newBuilder()
       .setMapId(pushFailedBatch.getMapId)

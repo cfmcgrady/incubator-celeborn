@@ -134,6 +134,38 @@ message PbPartitionLocation {
   int32 splitEnd = 13;
 }
 
+// Compact version of PbPartitionLocation that uses workerIndex
+// to reference a worker in an external dictionary instead of
+// embedding host/rpcPort/pushPort/fetchPort/replicatePort inline.
+// This dramatically reduces message size when many partitions
+// share the same set of workers.
+message PbCompactPartitionLocation {
+  PbPartitionLocation.Mode mode = 1;
+  int32 id = 2;
+  int32 epoch = 3;
+  // Index into the workerInfos list in the enclosing message
+  int32 workerIndex = 4;
+  PbCompactPartitionLocation peer = 5;
+  // Use compact storage info with dictionary references (preferred)
+  PbCompactStorageInfo compactStorageInfo = 10;
+  bytes mapIdBitmap = 7;
+  int32 splitStart = 8;
+  int32 splitEnd = 9;
+}
+
+// Compact version of PbStorageInfo that uses dictionary indices
+// for mountPoint (deduplicated via mountPoints list).
+message PbCompactStorageInfo {
+  int32 type = 1;
+  // Index into the mountPoints list in the enclosing response message
+  int32 mountPointIndex = 2;
+  bool finalResult = 3;
+  string filePath = 4;
+  int32 availableStorageTypes = 5;
+  int64 fileSize = 6;
+  repeated int64 chunkOffsets = 7;
+}
+
 message PbWorkerResource {
   repeated PbPartitionLocation primaryPartitions = 1;
   repeated PbPartitionLocation replicaPartitions = 2;
@@ -162,6 +194,21 @@ message PbWorkerInfo {
 
 message PbFileGroup {
   repeated PbPartitionLocation locations = 1;
+}
+
+// Compact version of PbFileGroup that uses PbCompactPartitionLocation
+message PbCompactFileGroup {
+  repeated PbCompactPartitionLocation locations = 1;
+}
+
+// Compact worker info for dictionary use in GetReducerFileGroupResponse.
+// Only contains network address fields needed by PartitionLocation.
+message PbCompactWorkerInfo {
+  string host = 1;
+  int32 rpcPort = 2;
+  int32 pushPort = 3;
+  int32 fetchPort = 4;
+  int32 replicatePort = 5;
 }
 
 message PbRegisterWorker {
@@ -314,7 +361,7 @@ message PbGetReducerFileGroup {
 
 message PbGetReducerFileGroupResponse {
   int32 status = 1;
-  // PartitionId -> Partition FileGroup
+  // PartitionId -> Partition FileGroup (original, kept for backward compatibility)
   map<int32, PbFileGroup> fileGroups = 2;
 
   // only reduce partition mode need know valid attempts
@@ -324,6 +371,21 @@ message PbGetReducerFileGroupResponse {
   repeated int32 partitionIds = 4;
 
   map<string, PbPushFailedBatchSet> pushFailedBatches = 5;
+
+  bytes broadcast = 6;
+
+  // Worker dictionary for compact file groups.
+  // Each PbCompactPartitionLocation references a worker by index into this list.
+  repeated PbCompactWorkerInfo workerInfos = 7;
+
+  // Compact version of fileGroups using worker index references.
+  // When this field is populated, fileGroups (field 2) will be empty.
+  map<int32, PbCompactFileGroup> compactFileGroups = 8;
+
+  // MountPoint dictionary for compact storage info.
+  // Each PbCompactStorageInfo references a mountPoint by index into this list.
+  repeated string mountPoints = 9;
+
 }
 
 message PbGetShuffleId {

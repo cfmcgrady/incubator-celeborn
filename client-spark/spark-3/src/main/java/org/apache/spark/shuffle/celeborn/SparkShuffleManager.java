@@ -125,6 +125,12 @@ public class SparkShuffleManager implements ShuffleManager {
         if (lifecycleManager == null) {
           lifecycleManager = new LifecycleManager(appUniqueId, celebornConf);
           lifecycleManager.registerCancelShuffleCallback(SparkUtils::cancelShuffle);
+          if (celebornConf.getReducerFileGroupBroadcastEnabled()) {
+            lifecycleManager.registerBroadcastGetReducerFileGroupResponseCallback(
+                SparkUtils::serializeGetReducerFileGroupResponse);
+            lifecycleManager.registerInvalidatedBroadcastCallback(
+                SparkUtils::invalidateSerializedGetReducerFileGroupResponse);
+          }
           if (celebornConf.clientFetchThrowsFetchFailure()) {
             MapOutputTrackerMaster mapOutputTracker =
                 (MapOutputTrackerMaster) SparkEnv.get().mapOutputTracker();

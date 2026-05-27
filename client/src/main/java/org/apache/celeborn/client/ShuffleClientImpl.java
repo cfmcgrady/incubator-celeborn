@@ -41,6 +41,7 @@ import org.apache.celeborn.client.compress.Compressor;
 import org.apache.celeborn.client.read.CelebornInputStream;
 import org.apache.celeborn.client.read.MetricsCallback;
 import org.apache.celeborn.common.CelebornConf;
+import org.apache.celeborn.common.exception.CelebornBroadcastException;
 import org.apache.celeborn.common.exception.CelebornIOException;
 import org.apache.celeborn.common.identity.UserIdentifier;
 import org.apache.celeborn.common.network.TransportContext;
@@ -1697,6 +1698,16 @@ public class ShuffleClientImpl extends ShuffleClient {
 
           switch (response.status()) {
             case SUCCESS:
+              if (response.broadcast() != null && response.broadcast().length > 0) {
+                response =
+                    ShuffleClient.deserializeReducerFileGroupResponse(
+                        shuffleId, response.broadcast());
+                if (response == null) {
+                  throw new CelebornBroadcastException(
+                      "Failed to get GetReducerFileGroupResponse broadcast for shuffle: "
+                          + shuffleId);
+                }
+              }
               logger.info(
                   "Shuffle {} request reducer file group success using {} ms, result partition size {}.",
                   shuffleId,
